@@ -8,9 +8,11 @@ plan and the acceptance criteria; read it in full at the start of each session, 
 - Write only inside this repository (including `build/`, git-ignored). The mechanosynthesis repository
   `../claude-molecular-renderer` is read-only: its `libxtb.dylib` is the production library and the baseline; never
   modify or replace it. Never modify the Homebrew xtb install.
-- xTB source changes go on a branch in the `xtb/` submodule (fork github.com/philipturner/xtb; remote `upstream` =
-  grimme-lab/xtb), one commit per step with its measurement in the message, plus the matching submodule-pointer commit
-  here. Pushing to GitHub, opening pull requests or anything else outward-facing: ask the user first.
+- xTB source changes go on the public branch `diagonalization` of the `xtb/` submodule (fork github.com/philipturner/xtb;
+  remote `upstream` = grimme-lab/xtb), one commit per step with its measurement in the message, plus the matching
+  submodule-pointer commit here. Never commit to the fork's `main`: it only fast-forwards to upstream `main`
+  (`git -C xtb push origin upstream/main:main`). Pushing `diagonalization` is allowed; never force-push it (merge
+  upstream, don't rebase). Ask the user before pull requests upstream or any other outward-facing step.
 - Cold SCF is the default (fresh results object per single point). Warm starts (chained handle, or one fixed seed as in
   swift-xtb's `xTB_Seed`) are an optional engineering variable: report them separately, never in place of cold numbers.
 - Never loosen SCC convergence thresholds. Report measured numbers only; say plainly what could not be measured.

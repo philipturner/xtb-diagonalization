@@ -147,9 +147,10 @@ This repository (github.com/philipturner/xtb-diagonalization, private) is the wh
 
 Workflow for xTB changes:
 
-- Work on a branch inside the submodule (`git -C xtb switch -c diag/<step>`), one commit per step with its measurement in the message. Commit the new submodule pointer in this repository at the same time, so every result here names the exact xTB commit it came from.
-- Differences from upstream are plain git: `git -C xtb diff upstream/main`, `git -C xtb log upstream/main..HEAD`. Upgrading is `git -C xtb fetch upstream` plus a rebase or merge.
-- Pushing the branch to the fork, and anything outward-facing (pull requests upstream), is the user's call; ask first.
+- All xTB work goes on ONE branch of the fork, `diagonalization` (public; already created locally in `xtb/`, tracked by `.gitmodules`). One commit per step with its measurement in the message. Commit the new submodule pointer in this repository at the same time, so every result here names the exact xTB commit it came from. Short experiments may use side branches (`diag/<topic>`) that merge into `diagonalization`.
+- The fork's `main` is never committed to: it only mirrors grimme-lab's `main`, so syncing is a fast-forward (`git -C xtb fetch upstream`, then `git -C xtb push origin upstream/main:main`). Bring upstream changes into the work with `git -C xtb merge upstream/main` on `diagonalization` (merge, not rebase, because the branch is public).
+- Differences from upstream are plain git: `git -C xtb diff upstream/main...diagonalization`, `git -C xtb log upstream/main..diagonalization`.
+- Pushing `diagonalization` (and `diag/*`) to the fork is allowed. Never push to the fork's `main` anything but a fast-forward to upstream, never force-push `diagonalization`, and ask the user before opening pull requests upstream.
 - Baseline v6.7.1 (the version of the production library): `git -C xtb fetch upstream --tags`, then `git -C xtb worktree add ../build/xtb-v6.7.1 v6.7.1`. Don't edit it.
 - Build trees go under `build/` (for example `build/xtb-build-main/`, `build/xtb-build-v6.7.1/`). Meson subprojects (mctc-lib and others) are downloaded when a build is configured: allow their hosts once, then build offline.
 - The mechanosynthesis repository is read-only from here: never write into `../claude-molecular-renderer`, and never replace its `libxtb.dylib`. A faster library is handed over only after the gates pass from both Python and Swift, and the user decides.
