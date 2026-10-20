@@ -1,0 +1,34 @@
+id	file	atoms	n_basis	uhf	charge	shell	elements	source (.build/)	exercises
+t2_R	t2_R.xyz	37	124	1	0	open (uhf 1)	{'Si': 8, 'H': 23, 'C': 5, 'Ge': 1}	stage3/htx/dft_stage1/cc_inputs/depth_z2.8__R.xyz	T2 cluster Si8H14 + Ge(CH3)3-C#C* (reactant), small n
+t2_TS	t2_TS.xyz	37	124	1	0	open (uhf 1)	{'Si': 8, 'H': 23, 'C': 5, 'Ge': 1}	stage3/htx/dft_stage1/cc_inputs/depth_z2.8__TS.xyz	T2 H-transfer saddle (H shared by C(t) and Si): radical, near-degenerate
+t2_R_rms05	t2_R_rms05.xyz	37	124	1	0	open (uhf 1)	{'Si': 8, 'H': 23, 'C': 5, 'Ge': 1}	derived from t2_R (seeded Gaussian displacement)	t2_R displaced 0.05 A rms: off-equilibrium forces (thermal-size)
+t2_R_rms15	t2_R_rms15.xyz	37	124	1	0	open (uhf 1)	{'Si': 8, 'H': 23, 'C': 5, 'Ge': 1}	derived from t2_R (seeded Gaussian displacement)	t2_R displaced 0.15 A rms: off-equilibrium forces (far from equilibrium)
+diamond122	diamond122.xyz	82	196	0	0	closed	{'C': 38, 'H': 44}	xtb_bench/diamond122.xyz	swift-xtb diamond cell (closed shell, degenerate levels)
+diamond222	diamond222.xyz	139	364	0	0	closed	{'C': 75, 'H': 64}	xtb_bench/diamond222.xyz	swift-xtb diamond cell
+diamond222_rms05	diamond222_rms05.xyz	139	364	0	0	closed	{'C': 75, 'H': 64}	derived from diamond222 (seeded Gaussian displacement)	diamond222 displaced 0.05 A rms: off-equilibrium forces (thermal-size)
+diamond222_rms15	diamond222_rms15.xyz	139	364	0	0	closed	{'C': 75, 'H': 64}	derived from diamond222 (seeded Gaussian displacement)	diamond222 displaced 0.15 A rms: off-equilibrium forces (far from equilibrium)
+s12_C00	s12_C00.xyz	94	396	1	0	open (uhf 1)	{'Si': 31, 'H': 45, 'C': 15, 'O': 3}	dft/sp-common/C00.xyz	Stage 1/2 common region, MAOC-C2 tool on Si(100) 2x3
+facet_bare_dimer	facet_bare_dimer.xyz	90	410	0	0	closed	{'Si': 40, 'H': 50}	derived from facet_closed (2 H removed)	one bare Si=Si dimer: small HOMO-LUMO gap, Fermi smearing active
+facet_dbpair_u0	facet_dbpair.xyz	90	410	0	0	closed	{'Si': 40, 'H': 50}	derived from dbw_h0_near (tool removed)	bare DB pair on two dimers, no tool: diradical, singlet vs triplet
+facet_dbpair_u2	facet_dbpair.xyz	90	410	2	0	open (uhf 2)	{'Si': 40, 'H': 50}	derived from dbw_h0_near (tool removed)	bare DB pair on two dimers, no tool: diradical, singlet vs triplet
+facet_closed	facet_closed.xyz	92	412	0	0	closed	{'Si': 40, 'H': 52}	derived from cap_d3.60 (tool removed)	H-passivated 40-Si facet, closed shell
+facet_closed_rms05	facet_closed_rms05.xyz	92	412	0	0	closed	{'Si': 40, 'H': 52}	derived from facet_closed (seeded Gaussian displacement)	facet_closed displaced 0.05 A rms: off-equilibrium forces (thermal-size)
+facet_closed_rms15	facet_closed_rms15.xyz	92	412	0	0	closed	{'Si': 40, 'H': 52}	derived from facet_closed (seeded Gaussian displacement)	facet_closed displaced 0.15 A rms: off-equilibrium forces (far from equilibrium)
+s12_C31	s12_C31.xyz	103	419	1	0	open (uhf 1)	{'Si': 31, 'H': 51, 'Ge': 1, 'C': 17, 'O': 3}	dft/sp-common/C31.xyz	Stage 1/2 common region, EAOGe-C2 tool on Si(100) 2x3
+s12_C31_rms05	s12_C31_rms05.xyz	103	419	1	0	open (uhf 1)	{'Si': 31, 'H': 51, 'Ge': 1, 'C': 17, 'O': 3}	derived from s12_C31 (seeded Gaussian displacement)	s12_C31 displaced 0.05 A rms: off-equilibrium forces (thermal-size)
+s12_C31_rms15	s12_C31_rms15.xyz	103	419	1	0	open (uhf 1)	{'Si': 31, 'H': 51, 'Ge': 1, 'C': 17, 'O': 3}	derived from s12_C31 (seeded Gaussian displacement)	s12_C31 displaced 0.15 A rms: off-equilibrium forces (far from equilibrium)
+facet_dbpair_tool_u1	facet_dbpair_tool.xyz	105	448	1	0	open (uhf 1)	{'Si': 40, 'H': 59, 'C': 5, 'Ge': 1}	stage3/podkit_dbwall/kit/stage3/inputs/dbwall/dbw_h0_near.xyz	Stage 3 production: 40-Si facet with a BARE DB pair + C2 radical tool (3 unpaired; production uhf 1); hardest SCF
+facet_dbpair_tool_u3	facet_dbpair_tool.xyz	105	448	3	0	open (uhf 3)	{'Si': 40, 'H': 59, 'C': 5, 'Ge': 1}	stage3/podkit_dbwall/kit/stage3/inputs/dbwall/dbw_h0_near.xyz	Stage 3 production: 40-Si facet with a BARE DB pair + C2 radical tool (3 unpaired; production uhf 1); hardest SCF
+facet_capsi_product	facet_capsi_product.xyz	105	448	1	0	open (uhf 1)	{'Si': 40, 'H': 59, 'C': 5, 'Ge': 1}	stage3/t1/edgecheck/x+4.0_y+3.5_g0.330.xyz	C(t) bonded to a capped Si, two Si-Si back bonds broken (strained)
+facet_h_abstracted	facet_h_abstracted.xyz	105	448	1	0	open (uhf 1)	{'Si': 40, 'H': 59, 'C': 5, 'Ge': 1}	stage3/t1/edgecheck/x+2.5_y+3.5_g0.300.xyz	H abstraction product: C-H on the tool, new surface DB radical
+facet_dbpair_tool_rms05_u1	facet_dbpair_tool_rms05.xyz	105	448	1	0	open (uhf 1)	{'Si': 40, 'H': 59, 'C': 5, 'Ge': 1}	derived from facet_dbpair_tool (seeded Gaussian displacement)	facet_dbpair_tool displaced 0.05 A rms: off-equilibrium forces (thermal-size)
+facet_dbpair_tool_rms05_u3	facet_dbpair_tool_rms05.xyz	105	448	3	0	open (uhf 3)	{'Si': 40, 'H': 59, 'C': 5, 'Ge': 1}	derived from facet_dbpair_tool (seeded Gaussian displacement)	facet_dbpair_tool displaced 0.05 A rms: off-equilibrium forces (thermal-size)
+facet_dbpair_tool_rms15_u1	facet_dbpair_tool_rms15.xyz	105	448	1	0	open (uhf 1)	{'Si': 40, 'H': 59, 'C': 5, 'Ge': 1}	derived from facet_dbpair_tool (seeded Gaussian displacement)	facet_dbpair_tool displaced 0.15 A rms: off-equilibrium forces (far from equilibrium)
+facet_dbpair_tool_rms15_u3	facet_dbpair_tool_rms15.xyz	105	448	3	0	open (uhf 3)	{'Si': 40, 'H': 59, 'C': 5, 'Ge': 1}	derived from facet_dbpair_tool (seeded Gaussian displacement)	facet_dbpair_tool displaced 0.15 A rms: off-equilibrium forces (far from equilibrium)
+facet_capped_tool	facet_capped_tool.xyz	107	450	1	0	open (uhf 1)	{'Si': 40, 'H': 61, 'C': 5, 'Ge': 1}	stage3/podkit_capsi/kit/stage3/inputs/capsi/cap_d3.60.xyz	fully H-capped facet + radical tool
+s3_S40_156	s3_S40_156.xyz	156	592	1	0	open (uhf 1)	{'Si': 46, 'H': 89, 'Ge': 1, 'C': 17, 'O': 3}	stage3/fullcheck_S40_p002.xyz	Stage 3 explicit GFN2 region (S40)
+s3_S42_159	s3_S42_159.xyz	159	619	1	0	open (uhf 1)	{'Si': 49, 'H': 89, 'Ge': 1, 'C': 17, 'O': 3}	stage3/springs_renders/S42_prerupture.xyz	Stage 3 explicit GFN2 region (S42), just before a bond rupture
+s3_S42_159_rms05	s3_S42_159_rms05.xyz	159	619	1	0	open (uhf 1)	{'Si': 49, 'H': 89, 'Ge': 1, 'C': 17, 'O': 3}	derived from s3_S42_159 (seeded Gaussian displacement)	s3_S42_159 displaced 0.05 A rms: off-equilibrium forces (thermal-size)
+s3_S42_159_rms15	s3_S42_159_rms15.xyz	159	619	1	0	open (uhf 1)	{'Si': 49, 'H': 89, 'Ge': 1, 'C': 17, 'O': 3}	derived from s3_S42_159 (seeded Gaussian displacement)	s3_S42_159 displaced 0.15 A rms: off-equilibrium forces (far from equilibrium)
+s3_S49_163	s3_S49_163.xyz	163	655	1	0	open (uhf 1)	{'Si': 53, 'H': 89, 'Ge': 1, 'C': 17, 'O': 3}	stage3/springs_renders/S49_final.xyz	Stage 3 explicit GFN2 region (S49), largest n
+diamond233	diamond233.xyz	275	776	0	0	closed	{'C': 167, 'H': 108}	xtb_bench/diamond233.xyz	swift-xtb diamond cell (n 776 profile system)

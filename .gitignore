@@ -116,3 +116,8 @@ gfnff_charges
 
 *.pyc
 __pycache__
+
+# xtb-diagonalization
+/build/
+.sccnotconverged
+__pycache__/
