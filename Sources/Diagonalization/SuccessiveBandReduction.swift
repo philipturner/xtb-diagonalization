@@ -1,12 +1,12 @@
 // Successive band reduction (SBR), the driver: a symmetric matrix -> tridiagonal form through a chain of bandwidths
 // n - 1 -> b1 -> ... -> 1, each stage by its own routine (one file per step of the decomposition):
-//   BandForm.swift                       dense -> b1
-//   BandToBand.swift                     b_i -> b_{i+1}, the middle stages of 3 or more
-//   BulgeChasing.swift                   b_last -> 1
-//   DivideAndConquer.swift               the tridiagonal eigenproblem
-//   BulgeBackTransformation.swift        eigenvectors back through the bulge chase
-//   BandToBandBackTransformation.swift   ... through the middle stages
-//   BandFormBackTransformation.swift     ... through the first stage
+//   Stages/BandForm.swift                      dense -> b1
+//   Stages/BandToBand.swift                    b_i -> b_{i+1}, the middle stages of 3 or more
+//   Stages/BulgeChasing.swift                  b_last -> 1
+//   Stages/DivideAndConquer.swift              the tridiagonal eigenproblem
+//   Stages/BulgeBackTransformation.swift       eigenvectors back through the bulge chase
+//   Stages/BandToBandBackTransformation.swift  ... through the middle stages
+//   Stages/BandFormBackTransformation.swift    ... through the first stage
 // with the compact WY transforms in WYTransform.swift and the runtime switches in SBROptions.swift. 2-stage is the chain
 // [b], at no cost over a dedicated 2-stage driver; 3-stage [b1, b2]. 1-stage reduction is Tridiagonalization.swift.
 // sbrReduceGeneral is a test reference: every stage by BandToBand.swift's general routine, any chain including [].
@@ -97,7 +97,8 @@ public func sbrReduce<Real: BandReductionScalar>(
   reduceToBand(n, chain[1], a, lda, ws.v1, ws.t1, ws.work, first)
   stageTime?(0)
   for s in 2..<(chain.count - 1) {
-    ws.middle.append(reduceBandwidth(n, a, lda, bandIn: chain[s - 1], bandOut: chain[s], panel: chain[s]))
+    ws.middle.append(reduceBandwidth(n, a, lda, bandIn: chain[s - 1], bandOut: chain[s], panel: chain[s],
+                                     gemmWY: ws.options.gemmWY))
     stageTime?(s - 1)
   }
   chaseBulges(n, chain[chain.count - 2], a, lda, ws.v2, d, e, ws.work, ws.options)
@@ -113,13 +114,14 @@ public func sbrBackTransform<Real: BandReductionScalar>(
 ) {
   let n = ws.n, chain = ws.chain
   precondition(chain.count > 2, "SBR needs an intermediate bandwidth")
-  backTransformBulgesBlocked(n, chain[chain.count - 2], ws.v2, z, ldz, m, ws.work)
+  backTransformBulgesBlocked(n, chain[chain.count - 2], ws.v2, z, ldz, m, ws.work, gemm: ws.options.gemmWY,
+                             group: ws.options.bulgeGroup)
   stageTime?(chain.count - 2)
   for s in stride(from: chain.count - 2, through: 2, by: -1) {
     backTransform(ws.middle[s - 2], z, ldz, m)
     stageTime?(s - 1)
   }
-  backTransformBand(n, chain[1], ws.v1, ws.t1, z, ldz, m, ws.work)
+  backTransformBand(n, chain[1], ws.v1, ws.t1, z, ldz, m, ws.work, gemm: ws.options.gemmWY)
   stageTime?(0)
 }
 
@@ -136,6 +138,6 @@ public func backTransformTwoStage<Real: BandReductionScalar>(
   for c0 in stride(from: 0, to: m, by: block) {
     let width = min(block, m - c0)
     applyBulgeBlocks(blocks, z + c0 * ldz, ldz, width, parallelogram: options.parallelogram, work)
-    backTransformBand(n, b, v1, t1, z + c0 * ldz, ldz, width, work)
+    backTransformBand(n, b, v1, t1, z + c0 * ldz, ldz, width, work, gemm: options.gemmWY)
   }
 }

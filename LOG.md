@@ -251,3 +251,33 @@
   `Tridiagonalization.swift`). 2-stage is the chain [b] through the same driver at no extra cost (SBR[tcs] 32 = 2s[tcs]
   b = 32, same results); 3-stage now gets the optimized first and last stages. Regression: random n = 3–131, 98 runs,
   eigenvalues ≤ 5.3e-14, zero out-of-band leftovers.
+- **GEMM compact-WY apply (`SBROptions.gemmWY`, `--opts …g`) and bulge group size (`bulgeGroup`, `vN`)**
+  (2026-10-21). Microbenchmark (`scripts/kernels/wy.c`, one bulge block: 2b − 1 rows, b reflectors, m columns, 1
+  thread): Accelerate's `larfb` reaches only 26–80 GF/s FP64 / 42–170 GF/s FP32; the same work as gemm (VᵀZ) + trmm or
+  gemm (T) + gemm (Z −= VW) runs 64–218 / 89–600 GF/s, 2.2–4× faster (FP64 m = 588: b = 16/32/64 45/87/260 µs vs
+  17/32/88 µs). `larft` is minor (1.5–28 µs). T times W is faster as a dense gemm than as trmm (FP32 b = 32: 2.6 vs
+  10.6 µs). New `wyApply(gemm:)`: T copied dense, three gemm calls, both sides and both transposes; V is now stored
+  explicitly (unit diagonal, zeros above) where needed (BandForm with the option; BandToBand's stored steps). Used in
+  every back-transformation and in the reductions that use larfb (BandForm without `c`, BandToBand). Accuracy: random
+  n = 3–131, all 2s/SBR/general 3–4-stage chains, FP64 eigenvalues ≤ 5.0e-14, FP32 ≤ 6.8e-6, zero out-of-band
+  leftovers.
+  Latency (`build/gemmwy-sweep.txt`, median of 5, all vectors, best b, ms, `tcs` → `tcsg`): FP64 n = 412 15.54 →
+  14.61, 619 40.99 → 37.80, 776 63.73 → 62.34, 1204 211.3 → 191.8 (`tclsg` b = 64); FP32 412 10.48 → 8.90, 619
+  26.61 → 22.85, 776 42.01 → 37.79, 1204 117.7 → 102.1. The bulge back-transformation: FP64 n = 1204 b = 48 78.5 →
+  64.7, FP32 b = 32 102.5 → 33.3. 1-stage sym: FP64 9.3 / 25.6 / 41.8 / 135; FP32 5.6 / 15.3 / 25.5 / 72.
+  Best 2-stage / 1-stage sym now FP64 1.57 (412), 1.48 (619), 1.49 (776), 1.42 (1204); FP32 1.58, 1.49, 1.48, 1.42.
+  Throughput 8 × 1 (`build/gemmwy-throughput.txt`, 1 and 8 processes, jobs/s, b = 32/48 best): **FP32 gains at 8 × 1
+  too, FP64 doesn't at n ≥ 776.** FP64 `tcs` → `tcsg`: n = 412 376 → 389, 619 123 → 136, 776 81.1 → 75.6, 1204 20.2
+  → 18.4, 1788 5.40 → 5.05 (1-stage sym 640 / 222 / 136 / 27.0 / 6.44). FP32: 412 611 → 677, 619 214 → 252, 776 136
+  → 152, 1204 41.0 → 46.2, 1788 13.6 → 14.6 (1-stage sym 1159 / 416 / 234 / 74.3 / 15.6). Best 2-stage / 1-stage at
+  8 × 1: FP64 0.61 / 0.61 / 0.60 / 0.75 / 0.84 (n = 412 … 1788), FP32 0.58 / 0.61 / 0.65 / 0.62 / 0.93. Single
+  process n = 1788: FP64 `tcsg` b = 48 565 ms vs 1-stage 442; FP32 273 vs 202. The FP64 loss at 8 × 1 is consistent
+  with AMX contention (4 processes per AMX unit): larfb's copies don't use the AMX and overlap with other processes'
+  AMX work; three gemm calls keep it busy.
+  Bulge group size (`build/bulgegroup-latency.txt`, `-throughput.txt`): g < b sweeps per block cuts the arithmetic on
+  the block's zeros to (b + g − 1)/b but thins the gemm; at 1 × 1 g = 32 with b = 48/64 is neutral to 6% faster in
+  the stage, g = 24/16 lose 5–15% overall, g = 8 1.4–1.9× slower; at 8 × 1 FP64 (b = 48) g = 32/24 don't help either
+  (n = 1204: 18.5 / 18.2 vs larfb 19.5 jobs/s). Off by default.
+  Code: the stage files moved to `Sources/Diagonalization/Stages/` (found moved in the working tree at session start;
+  committed with this step). Next: per-precision defaults (gemmWY on for FP32; FP64 on for latency, off for 8 × 1 at
+  n ≥ 776), then the bulge chase (now the largest FP64 stage after the back-transformation) and occupied-only vectors.

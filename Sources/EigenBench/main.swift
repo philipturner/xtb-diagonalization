@@ -18,7 +18,8 @@
 // stage's largest entry outside its target band.
 // --opts "t;tcl;tclsp;tclspk128": extra 2-stage variants with SBROptions, one per set, named 2s[set]: t trailing
 // block only, c combined (sy2sb) update, l lower triangle, s symmetric chase, p parallelogram back-transformation,
-// kN column blocks of N. With p or k the bulge blocks are precomputed (stage "prep"); otherwise each is built just
+// kN column blocks of N, g compact WY blocks by three gemm calls instead of larfb, vN bulge back-transformation blocks
+// of N sweeps (default b). With p or k the bulge blocks are precomputed (stage "prep"); otherwise each is built just
 // before it's applied (backTransformBulgesBlocked), which is faster for one thread.
 // --procs P [--jobs K]: throughput instead of latency. For each variant, P copies of this program (one file only)
 // start together and each runs the variant K times (default 20) after a warm-up; reports jobs per second as a work
@@ -162,7 +163,7 @@ func readMatrix(_ path: String) -> (Int, UnsafeMutablePointer<Double>) {
 }
 
 /// SBROptions from a code string: t trailing block only, c combined update, l lower triangle, s symmetric chase,
-/// p parallelogram back-transformation, kN column blocks of N.
+/// p parallelogram back-transformation, kN column blocks of N, g gemm WY apply, vN bulge blocks of N sweeps.
 func parseOptions(_ set: String) -> SBROptions {
   var o = SBROptions()
   var rest = Substring(set)
@@ -174,6 +175,11 @@ func parseOptions(_ set: String) -> SBROptions {
     case "l": o.lowerTriangle = true
     case "s": o.symmetricChase = true
     case "p": o.parallelogram = true
+    case "g": o.gemmWY = true
+    case "v":
+      let digits = rest.prefix { $0.isNumber }
+      o.bulgeGroup = Int(digits)!
+      rest = rest.dropFirst(digits.count)
     case "k":
       let digits = rest.prefix { $0.isNumber }
       o.columnBlock = Int(digits)!
@@ -290,8 +296,8 @@ func benchmark<Real: EigenScalar>(_ path: String, _: Real.Type) {
             // Blocks built just before use (in cache): faster than precomputing them for one thread.
             t.append(0)
             timed(&t) {
-              backTransformBulgesBlocked(n, b, v2, Z, n, m, work)
-              backTransformBand(n, b, v1, t1, Z, n, m, work)
+              backTransformBulgesBlocked(n, b, v2, Z, n, m, work, gemm: o.gemmWY, group: o.bulgeGroup)
+              backTransformBand(n, b, v1, t1, Z, n, m, work, gemm: o.gemmWY)
             }
           }
         }))
@@ -304,7 +310,7 @@ func benchmark<Real: EigenScalar>(_ path: String, _: Real.Type) {
     for b in config + [1] where b < chain.last! && (b == 1 || b < n - 1) { chain.append(b) }
     guard n >= 2, chain.count >= (sbrGeneral ? 2 : 3) else { continue }
     let names = (1..<chain.count).map { "\(chain[$0 - 1] == n - 1 ? "n" : String(chain[$0 - 1]))>\(chain[$0])" }
-    let label = "SBR" + (sbrGeneral ? "gen " : sbrOptions.isEmpty ? " " : "[\(sbrOptions)] ")
+    let label = "SBR" + (sbrGeneral ? "gen" : "") + (sbrOptions.isEmpty ? " " : "[\(sbrOptions)] ")
       + chain.dropFirst().dropLast().map(String.init).joined(separator: "-")
     let vi = variants.count
     if !sbrGeneral {
@@ -324,6 +330,7 @@ func benchmark<Real: EigenScalar>(_ path: String, _: Real.Type) {
         }))
       continue
     }
+    let generalGEMM = parseOptions(sbrOptions).gemmWY
     variants.append(Variant(
       name: label, stages: names + ["stedc"] + names.reversed().map { "bt" + $0 },
       run: { t in
@@ -336,14 +343,14 @@ func benchmark<Real: EigenScalar>(_ path: String, _: Real.Type) {
               chaseBulges(n, tail, A, n, v2, w, e, work)
             } else {
               stages.append(reduceBandwidth(n, A, n, bandIn: chain[s - 1], bandOut: chain[s], panel: chain[s],
-                                            windowed: windowed))
+                                            windowed: windowed, gemmWY: generalGEMM))
             }
           }
         }
         for i in 0..<n { w[i] = A[i + i * n] }
         for i in 0..<(n - 1) { e[i] = A[(i + 1) + i * n] }
         timed(&t) { stedc() }
-        if tail > 0 { timed(&t) { backTransformBulgesBlocked(n, tail, v2, Z, n, m, work) } }
+        if tail > 0 { timed(&t) { backTransformBulgesBlocked(n, tail, v2, Z, n, m, work, gemm: generalGEMM) } }
         for stage in stages.reversed() { timed(&t) { backTransform(stage, Z, n, m) } }
         leftovers[vi] = "; outside band per stage " + stages.map { String(format: "%.0e", Double($0.leftover)) }
           .joined(separator: " ")
@@ -396,7 +403,7 @@ func benchmark<Real: EigenScalar>(_ path: String, _: Real.Type) {
         all += f.dropFirst(2)
       }
       all.sort()
-      print("  " + v.name.padding(toLength: 14, withPad: " ", startingAt: 0)
+      print("  " + v.name.padding(toLength: 18, withPad: " ", startingAt: 0)
         + String(format: " %7.2f jobs/s  median job %7.2f ms  worker elapsed %.2f-%.2f s", rate,
                  1e3 * all[all.count / 2], spread.min()!, spread.max()!))
     }

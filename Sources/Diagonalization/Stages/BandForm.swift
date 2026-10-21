@@ -20,6 +20,8 @@ public func bandReductionWorkspace(_ n: Int, _ b: Int) -> Int {
 /// set to zero. For the back-transformation it keeps, per panel at column offset j, the Householder vectors in
 /// v1 (n x n, leading dimension n; rows j + b ..< n of columns j ..< j + k, geqrf layout, unit diagonal implied) and
 /// the triangular factor T in t1 (b x n, leading dimension b; columns j ..< j + k), where k = min(b, n - j - b).
+/// With options.gemmWY, V is stored explicitly (unit diagonal, zeros above; R goes only to a) and the block reflectors
+/// are applied by three gemm calls.
 @_specialize(exported: true, where Real == Double)
 @_specialize(exported: true, where Real == Float)
 public func reduceToBand<Real: BandReductionScalar>(
@@ -44,14 +46,16 @@ public func reduceToBand<Real: BandReductionScalar>(
     Real.geqrf(m, b, v, n, tau, scratch, lscratch)
     let t = t1 + offset(0, j, b)
     wyFactor(m, k, v, n, tau, t, b)
+    let g = options.gemmWY
+    if g && !options.combinedUpdate { wyMakeExplicit(m, k, v, n) }
     if !trailing {
       // A = Q^T A Q on rows and columns r ..< n, applied to the whole matrix.
-      wyApply("L", "T", m, n, k, v, n, t, b, a + r, lda, scratch, n)
-      wyApply("R", "N", n, m, k, v, n, t, b, a + offset(0, r, lda), lda, scratch, n)
+      wyApply("L", "T", m, n, k, v, n, t, b, a + r, lda, scratch, n, gemm: g)
+      wyApply("R", "N", n, m, k, v, n, t, b, a + offset(0, r, lda), lda, scratch, n, gemm: g)
     } else if !options.combinedUpdate {
       // The same on rows and columns j ..< n only: everything before column j is already zero there.
-      wyApply("L", "T", m, n - j, k, v, n, t, b, a + offset(r, j, lda), lda, scratch, n - j)
-      wyApply("R", "N", n - j, m, k, v, n, t, b, a + offset(j, r, lda), lda, scratch, n - j)
+      wyApply("L", "T", m, n - j, k, v, n, t, b, a + offset(r, j, lda), lda, scratch, n - j, gemm: g)
+      wyApply("R", "N", n - j, m, k, v, n, t, b, a + offset(j, r, lda), lda, scratch, n - j, gemm: g)
     } else {
       // The panel below the band becomes R (both triangles).
       for c in 0..<b {
@@ -65,6 +69,7 @@ public func reduceToBand<Real: BandReductionScalar>(
       for c in 0..<k {
         for i in 0..<m { vf[offset(i, c, m)] = i < c ? 0 : (i == c ? 1 : v[offset(i, c, n)]) }
       }
+      if g { wyMakeExplicit(m, k, v, n) }
       // Trailing block A2 = A[r ..< n, r ..< n]: X = A2 V T, W = X - 1/2 V (T^T V^T X), A2 -= V W^T + W V^T.
       let a2 = a + offset(r, r, lda)
       if lower {

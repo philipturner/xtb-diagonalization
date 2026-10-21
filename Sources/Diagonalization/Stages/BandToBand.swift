@@ -33,24 +33,28 @@ public struct BandReductionStage<Real: BandReductionScalar> {
   public var t: [Real] = []
   /// Largest |A(i, j)| outside the b_out band before it was cleared (should be rounding-level)
   public var leftover: Real = 0
+  /// V stored explicitly and every block applied by three gemm calls (SBROptions.gemmWY)
+  public var gemmWY = false
 }
 
 /// Reduces the symmetric matrix a (n x n, full storage) from bandwidth bandIn to bandOut, in place, with panel width
 /// panel (1 ... bandOut). Entries outside the new band are set to zero (their largest magnitude is reported as
-/// leftover). windowed = false applies every step to the whole matrix (slow; a cross-check of the window).
+/// leftover). windowed = false applies every step to the whole matrix (slow; a cross-check of the window). gemmWY:
+/// SBROptions.gemmWY, here and in the stage's back-transformation.
 @_specialize(exported: true, where Real == Double)
 @_specialize(exported: true, where Real == Float)
 public func reduceBandwidth<Real: BandReductionScalar>(
   _ n: Int, _ a: UnsafeMutablePointer<Real>, _ lda: Int, bandIn: Int, bandOut: Int, panel: Int,
-  windowed: Bool = true
+  windowed: Bool = true, gemmWY: Bool = false
 ) -> BandReductionStage<Real> {
   precondition(bandOut >= 1 && bandOut < bandIn && panel >= 1 && panel <= bandOut, "invalid band reduction")
   var stage = BandReductionStage<Real>(bandIn: bandIn, bandOut: bandOut, panel: panel)
+  stage.gemmWY = gemmWY
   let h = panel + bandIn - bandOut
   var block = [Real](repeating: 0, count: h * panel)
   var tau = [Real](repeating: 0, count: panel)
   var tBlock = [Real](repeating: 0, count: panel * panel)
-  var work = [Real](repeating: 0, count: max(64 * panel, n * panel))
+  var work = [Real](repeating: 0, count: max(64 * panel, wyApplyWorkspace(n, panel)))
 
   for j in stride(from: 0, to: max(0, n - bandOut - 1), by: panel) {
     var cs = j, rs = j + bandOut
@@ -68,6 +72,7 @@ public func reduceBandwidth<Real: BandReductionScalar>(
             tBlock.withUnsafeMutableBufferPointer { t in
               Real.geqrf(height, width, v.baseAddress!, height, tp.baseAddress!, wp.baseAddress!, wp.count)
               wyFactor(height, count, v.baseAddress!, height, tp.baseAddress!, t.baseAddress!, panel)
+              if gemmWY { wyMakeExplicit(height, count, v.baseAddress!, height) }
             }
           }
         }
@@ -82,9 +87,9 @@ public func reduceBandwidth<Real: BandReductionScalar>(
           work.withUnsafeMutableBufferPointer { wp in
             // A = Q^T A Q on the window.
             wyApply("L", "T", height, hi - lo, count, v.baseAddress!, height, t.baseAddress!, panel,
-                       a + rs + lo * lda, lda, wp.baseAddress!, hi - lo)
+                       a + rs + lo * lda, lda, wp.baseAddress!, hi - lo, gemm: gemmWY)
             wyApply("R", "N", hi - lo, height, count, v.baseAddress!, height, t.baseAddress!, panel,
-                       a + lo + rs * lda, lda, wp.baseAddress!, hi - lo)
+                       a + lo + rs * lda, lda, wp.baseAddress!, hi - lo, gemm: gemmWY)
           }
         }
       }

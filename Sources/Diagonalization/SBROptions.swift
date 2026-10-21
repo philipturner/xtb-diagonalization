@@ -18,6 +18,12 @@ public struct SBROptions {
   public var parallelogram = false
   /// Back-transform the eigenvectors in blocks of this many columns (0: all at once), both stages per block.
   public var columnBlock = 0
+  /// Every compact WY block applied as three gemm calls instead of Accelerate's larfb (WYTransform.swift), in the
+  /// back-transformations and in the reductions that use larfb (BandForm without combinedUpdate, BandToBand).
+  public var gemmWY = false
+  /// Sweeps per block of the bulge back-transformation (1 ... b; 0 means b): fewer than b wastes less arithmetic on the
+  /// block's zeros ((b + g - 1) / b times the reflectors' own) for a thinner gemm.
+  public var bulgeGroup = 0
 
   public init() {}
 
@@ -25,7 +31,7 @@ public struct SBROptions {
   public static var all: SBROptions {
     var o = SBROptions()
     o.trailingOnly = true; o.combinedUpdate = true; o.lowerTriangle = true; o.symmetricChase = true
-    o.parallelogram = true
+    o.parallelogram = true; o.gemmWY = true
     return o
   }
 }

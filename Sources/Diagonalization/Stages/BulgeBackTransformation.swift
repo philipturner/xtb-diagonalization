@@ -31,32 +31,36 @@ public func backTransformBulges<Real: BandReductionScalar>(
 
 /// Workspace (elements) for backTransformBulgesBlocked.
 public func bulgeBackTransformWorkspace(_ b: Int, _ m: Int) -> Int {
-  2 * b * b + b * b + b + m * b
+  2 * b * b + b * b + b + wyApplyWorkspace(m, b)
 }
 
 /// backTransformBulges with the reflectors of b consecutive sweeps at the same bulge index k combined into one block
 /// reflector I - V T V^T (V: 2b - 1 rows, b columns, each column shifted down one row from the previous), applied with
 /// larfb (swift-xtb's draft). Order: k ascending, sweep blocks descending, which equals the reverse of the reduction
 /// order because every pair it swaps acts on disjoint rows: H(s, k) and H(s', k') with s > s' and k > k' are at least
-/// b + 1 rows apart, and the same sweep's reflectors are disjoint.
+/// b + 1 rows apart, and the same sweep's reflectors are disjoint. gemm: each block by three gemm calls instead of larfb
+/// (SBROptions.gemmWY; V is built explicitly either way). group: sweeps per block (SBROptions.bulgeGroup, 1 ... b; 0
+/// means b). The sequence of reflectors is the same for every group size: g sweeps make V b + g - 1 rows by g columns,
+/// so the arithmetic is (b + g - 1) / b times the reflectors' own (2x at g = b) for a thinner gemm.
 @_specialize(exported: true, where Real == Double)
 @_specialize(exported: true, where Real == Float)
 public func backTransformBulgesBlocked<Real: BandReductionScalar>(
   _ n: Int, _ b: Int, _ v2: UnsafePointer<Real>, _ z: UnsafeMutablePointer<Real>, _ ldz: Int, _ m: Int,
-  _ work: UnsafeMutablePointer<Real>
+  _ work: UnsafeMutablePointer<Real>, gemm: Bool = false, group: Int = 0
 ) {
   guard b > 1, n > 2 else { return }
+  let g = group > 0 ? min(group, b) : b
   let ldv = 2 * b
   let v = work, t = work + ldv * b, tau = t + b * b, scratch = tau + b
   let sweeps = n - 2
   var k = 0
   while bulgeReflectorRows(n, b, 0, k).0 < n {
-    for s0 in stride(from: (sweeps - 1) / b * b, through: 0, by: -b) {
+    for s0 in stride(from: (sweeps - 1) / g * g, through: 0, by: -g) {
       let r0 = bulgeReflectorRows(n, b, s0, k).0
       guard r0 < n else { continue }
-      let height = min(2 * b - 1, n - r0)
+      let height = min(b + g - 1, n - r0)
       // Reflectors of sweeps s0 ..< s0 + count, column c starting at row c of the block.
-      let count = min(b, sweeps - s0, height)
+      let count = min(g, sweeps - s0, height)
       for c in 0..<count {
         let s = s0 + c
         let (rs, re) = bulgeReflectorRows(n, b, s, k)
@@ -74,7 +78,7 @@ public func backTransformBulgesBlocked<Real: BandReductionScalar>(
         }
       }
       wyFactor(height, count, v, ldv, tau, t, b)
-      wyApply("L", "N", height, m, count, v, ldv, t, b, z + r0, ldz, scratch, max(m, 1))
+      wyApply("L", "N", height, m, count, v, ldv, t, b, z + r0, ldz, scratch, max(m, 1), gemm: gemm)
     }
     k += 1
   }
@@ -143,7 +147,7 @@ public func prepareBulgeBlocks<Real: BandReductionScalar>(
 }
 
 /// Workspace (elements) for applyBulgeBlocks.
-public func bulgeBlocksWorkspace(_ b: Int, _ m: Int) -> Int { 3 * b * m }
+public func bulgeBlocksWorkspace(_ b: Int, _ m: Int) -> Int { 2 * b * m + wyApplyWorkspace(m, b) }
 
 /// z = Q z for the first m columns of z with stage 2's precomputed blocks (as backTransformBulgesBlocked). With
 /// parallelogram, each full block (2b - 1 rows, b vectors) goes through wyApplyParallelogram (triangular products at

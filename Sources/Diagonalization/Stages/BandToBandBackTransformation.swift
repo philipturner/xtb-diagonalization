@@ -7,13 +7,14 @@
 public func backTransform<Real: BandReductionScalar>(
   _ stage: BandReductionStage<Real>, _ z: UnsafeMutablePointer<Real>, _ ldz: Int, _ m: Int
 ) {
-  var work = [Real](repeating: 0, count: max(1, m * stage.panel))
+  var work = [Real](repeating: 0, count: max(1, wyApplyWorkspace(m, stage.panel)))
   stage.v.withUnsafeBufferPointer { v in
     stage.t.withUnsafeBufferPointer { t in
       work.withUnsafeMutableBufferPointer { wp in
         for step in stage.steps.reversed() {
           wyApply("L", "N", step.height, m, step.count, v.baseAddress! + step.vOffset, step.height,
-                     t.baseAddress! + step.tOffset, step.count, z + step.rowStart, ldz, wp.baseAddress!, max(m, 1))
+                     t.baseAddress! + step.tOffset, step.count, z + step.rowStart, ldz, wp.baseAddress!, max(m, 1),
+                     gemm: stage.gemmWY)
         }
       }
     }
