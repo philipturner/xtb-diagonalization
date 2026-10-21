@@ -162,3 +162,10 @@
   at n = 124/412/419/448/619/776, ~45–49 GB/s, 0.26–0.41% of an SCC cycle; whole-cycle timing (`copy` − `sym`) can't
   resolve it (±1 ms noise). The Swift library exports both new functions (`build/xtb-build-swift` links; same bits as
   the C library on `facet_dbpair_tool`, 6 runs). Not yet merged into `diag/production`.
+- **8 × 1 throughput, `XTB_SCC_TRD`** (`build/trd-8x1`, sweep.py, 2–4 alternating rounds): `full` loses. Queue rate
+  (sum of per-worker rates) vs `sym` at n = 412/448/619/776: −6.7/−6.1/−1.9/−17.4%; by the slowest worker −11/−12/−8/
+  −19%. Its median single point is still 5–8% faster at n = 412–619 but 15% slower at 776, and the spread between
+  workers grows (21–38% vs 2–23%). `copy` matches `sym` (n = 776 4.42 vs 4.43 jobs/s; n = 448 8.45 vs 8.72, within
+  round-to-round noise), so the extra matrix isn't the problem: the full-matrix Accelerate kernels contend, probably
+  on the AMX (one per cluster), where our NEON `symv` doesn't. Default switched back to `sym` (`xtb` commit after
+  `26984c0`; 174/174 bit-identical to the earlier tip). Lesson for Phase 4: AMX-heavy kernels need the 8 × 1 check.
