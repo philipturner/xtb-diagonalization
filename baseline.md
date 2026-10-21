@@ -166,15 +166,35 @@ Chained starts need 18–37 cycles per point where cold needs 26–105; the fixe
 moves away from the seed (from 18 to 38 cycles on `facet_closed`). Every warm point reaches the cold SCF solution:
 largest differences 1.2e-7 Eh in energy, 2e-4 eV in gap, 1.1e-3 in occupations (`s12_C31`, gap 0.15–0.18 eV).
 
-**Noise floor and the gates.** A rerun of the same scans with gradients and charges recorded gives the largest
-warm-vs-cold differences over all 120 warm runs (95th percentile in brackets): energy 1.2e-7 (8e-8) Eh, gradient
-5.4e-5 (3e-5) Eh/bohr, gap 9.3e-6 (4e-6) Eh, charges 2.9e-4 (1.4e-4) e, occupations 1.1e-3 (6e-4). These are the SCC's
-own convergence noise (energy criterion 1e-6 Eh at accuracy 1.0). The first proposed approximate gates sat below it
-(gradient 1e-6, charges 1e-5: 54x and 29x below the noise), and its exact gates (1e-10 Eh) below what a correct
-upstream reformulation produced (v6.7.1 → main: up to 7.9e-8 Eh). The gates in `BRIEF.md` were reset on 2026-10-20 to
-3–5x the measured noise (gradient: 1.1x, by the user's priority), the same for every phase: |ΔE| ≤ 5e-7 Eh, gradient
-≤ 6e-5 Eh/bohr (4.9 pN; per-run limits after Phase 2 step 0), gap ≤ 5e-5 Eh, charges
-≤ 1e-3 e, occupations ≤ 5e-3; phases differ only in the allowed extra SCC cycles. `scripts/compare.py` implements them.
+**Noise floor and the gates.** The warm-start scans showed the SCC's own convergence noise (energy 1.2e-7 Eh, gradient
+5.4e-5 Eh/bohr, charges 2.9e-4 e over 120 warm runs) sitting above the first proposed gates. Phase 2 step 0 then
+measured it on the whole grid; see the next section. The gates adopted on 2026-10-20 are in `BRIEF.md` (Validation).
+
+## Noise floor over the whole grid (Phase 2 step 0)
+
+`scripts/noise.py`, production library: every one of the 174 `reference/` runs recomputed cold and from 2–3 converged
+neighbours (`xtb_copyResults` of the same structure and uhf at the neighbouring electronic temperature, and of the
+nearest `_rms05` copy), at accuracy 1.0 (`build/noise/acc1/`) and 0.01 (`build/noise/acc0.01/`). Maxima over starts
+that reach the cold run's SCF solution (max |Δf| < 0.05, |Δgap| < 1e-3 Eh, |ΔE| < 1e-5 Eh, max |Δq| < 5e-3 e):
+
+| Quantity | Accuracy 1.0: max (95th pct, median) | Accuracy 0.01: max (95th pct, median) |
+| --- | --- | --- |
+| Energy | 3.1e-7 (1.3e-7, 1.8e-8) Eh | 2.7e-11 (1.3e-11, 2.6e-12) Eh |
+| Gradient | 7.7e-5 (4.4e-5, 9.7e-6) Eh/bohr | 7.2e-7 (3.6e-7, 1.1e-7) Eh/bohr |
+| Gap | 2.8e-5 (9.7e-6, 1.7e-6) Eh | 3.6e-7 (8.1e-8, 1.9e-8) Eh |
+| Charges | 1.2e-3 (1.1e-4, 2.7e-5) e | 4.9e-6 (9.2e-7, 2.4e-7) e |
+| Occupations | 1.4e-3 (8.7e-4, 1.5e-4) | 1.5e-5 (8.8e-6, 1.7e-6) |
+
+- Largest gradient noise at accuracy 1.0: `facet_closed_rms15` u2 1000 K (7.7e-5; 3.4e-7 at 0.01: a very flat SCF),
+  `facet_dbpair_tool_rms05` u3 300 K (6.3e-5), `s3_S40_156` u3 300 K (5.9e-5); 8 runs above 4.8e-5.
+- **Two near-degenerate solutions:** `facet_closed_rms15` u2 300 K. Both warm starts agree with each other and land
+  1.3e-6 Eh from the cold result, with gradients 2e-3 Eh/bohr and charges 2.6e-2 e apart, at both accuracies.
+- **Warm starts that fail where cold converges:** `facet_bare_dimer` u0 300 K from its 1000 K result (250 cycles at
+  both accuracies; cold: 52 and 66), `s12_C00` u3 100 K from 300 K (accuracy 0.01; cold: 180).
+- **Tight production results** (`build/reference-tight/`, `make_reference.py --accuracy 0.01`): 172 of 174 converge
+  (171 at 1.0; `s12_C00` u3 100 K converges only at 0.01), 32% more SCC cycles; |E(1.0) − E(0.01)| ≤ 3.8e-7 Eh.
+- A first pass reused one C API environment per process, and an SCF failure left an error in it that skipped later
+  single points; `noise.py` now uses a fresh environment per single point and skips unconverged seeds.
 
 ## Pseudodiagonalization history
 

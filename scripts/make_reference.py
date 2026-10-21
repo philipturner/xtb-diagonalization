@@ -12,7 +12,9 @@ eigenvalues (Eh) and occupations (alpha + beta summed, as the API returns them),
 see 'gap_def'), SCC iterations (parsed from xtb's own output), converged flag, error text, wall time,
 library path + sha256. Plus reference/SUMMARY.tsv.
 
-  python3 scripts/make_reference.py [--lib PATH] [--out DIR] [--workers 4] [--only ID] [--one ID UHF ETEMP]
+  python3 scripts/make_reference.py [--lib PATH] [--out DIR] [--accuracy 1.0] [--workers 4] [--only ID] [--one ID UHF ETEMP]
+
+--accuracy changes xtb_setAccuracy for validation runs only (e.g. 0.01 for the tight-accuracy gate); production is 1.0.
 """
 import ctypes as C, hashlib, json, os, re, subprocess, sys, tempfile, time
 import numpy as np
@@ -25,7 +27,7 @@ BOHR = 0.52917721067
 Z = {'H': 1, 'C': 6, 'O': 8, 'Si': 14, 'Ge': 32}
 VE = {'H': 1, 'C': 4, 'O': 6, 'Si': 4, 'Ge': 4}
 ETEMPS = (100.0, 300.0, 1000.0)
-ACC, MAXIT = 1.0, 250
+ACC, MAXIT = float(os.environ.get('XTB_REF_ACCURACY', '1.0')), 250
 
 
 def read(fn):
@@ -112,8 +114,10 @@ def summary():
 
 
 def main():
-    global LIB, REF
+    global LIB, REF, ACC
     a = sys.argv[1:]
+    if '--accuracy' in a:
+        i = a.index('--accuracy'); ACC = float(a[i + 1]); os.environ['XTB_REF_ACCURACY'] = a[i + 1]; del a[i:i + 2]
     if '--lib' in a:
         i = a.index('--lib'); LIB = os.path.abspath(a[i + 1]); os.environ['XTB_LIB'] = LIB; del a[i:i + 2]
     if '--out' in a:

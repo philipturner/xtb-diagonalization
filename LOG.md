@@ -39,3 +39,16 @@
   own noise) once Phase 2 step 0 measures them, plus a second check at accuracy 0.01, where the noise is 150x
   smaller (s12_C31: gradient 2.8e-7 Eh/bohr, energy 1e-11 Eh): method error there ≤ 1e-6 Eh/bohr (0.08 pN).
   `warmstart.py --accuracy`. CLAUDE.md push rule changed: Claude commits, the user pushes.
+
+## 2026-10-20 (later) — Phase 2 step 0: noise floor, two-gate protocol adopted
+
+- **Noise floor, whole grid** (`scripts/noise.py`, 174 runs × 2–3 perturbed starts, accuracy 1.0 and 0.01): at 1.0,
+  gradient 7.7e-5 Eh/bohr (6.3 pN), charges 1.2e-3 e, energy 3.1e-7 Eh; at 0.01, gradient 7.2e-7 (0.06 pN), energy
+  2.7e-11 Eh. The 1.0 noise exceeded the 6e-5 / 1e-3 gates.
+- **Adopted (user's decision): two gate sets.** Method error at accuracy 0.01 against `build/reference-tight/`
+  (1e-10 Eh, 2e-6 Eh/bohr = 0.16 pN, 1e-6 Eh gap, 1e-5 e, 5e-5); same solution and convergence at 1.0 against
+  `reference/` (5e-7 Eh, 1e-4 Eh/bohr, 5e-5 Eh, 2e-3 e, 5e-3, plus cycle rules). `compare.py --gates
+  phase2|approx|tight|identical`; `make_reference.py --accuracy`.
+- **Found:** `facet_closed_rms15` u2 300 K has two near-degenerate SCF solutions (gated on same solution only);
+  `facet_bare_dimer` u0 300 K and `s12_C00` u3 100 K fail to converge from some warm starts (Phase 3 risk).
+- **Next:** Phase 2 step 2 (GEMM-based transform) and step 3 (hook point).
