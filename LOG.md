@@ -153,3 +153,12 @@
   every size (n = 619 FP64: 8.70 vs 10.71 ms). Candidate for xTB (~4–7% per single point, estimated, before the cost
   of mirroring the upper triangle the congruence writes); not implemented. BRIEF Phase 4 step 6 reordered: block-size
   range first, each optimization behind a runtime Boolean, checked over that range.
+- **Full-matrix reduction in xTB** (`26984c0`, default; `XTB_SCC_TRD=sym|copy|full`): the congruence's upper triangle
+  is mirrored into a copy with lda padded to 64 bytes (`xtb_dsymmetrize_pad`), reduced by `xtb_dsytrd_full` (gemv 'T',
+  gemm, ger), and `dormtr` reads the copy. Gates: `sym` bit-identical to the tip (174/174); `full` phase2 174/174 and
+  tight 174/174 (vs `sym`: |dE| ≤ 2.4e-9 Eh, max|dg| ≤ 5.5e-7 Eh/bohr), cycles unchanged. Single points vs `sym`
+  (`build/trd-wall`, 1 thread, 3 rounds): −1.5% (n = 124), −7.3% (412), −2.2% (419), −8.3% (448), −11.8% (619), −2.0%
+  (776); 2 threads (1 round) −1.1 to −10.3%. Copy alone (`scripts/kernels/symcopy.c`, median of 501): 4/46/43/52/95/150 µs
+  at n = 124/412/419/448/619/776, ~45–49 GB/s, 0.26–0.41% of an SCC cycle; whole-cycle timing (`copy` − `sym`) can't
+  resolve it (±1 ms noise). The Swift library exports both new functions (`build/xtb-build-swift` links; same bits as
+  the C library on `facet_dbpair_tool`, 6 runs). Not yet merged into `diag/production`.

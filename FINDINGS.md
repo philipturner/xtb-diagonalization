@@ -19,6 +19,13 @@ round-robin rounds of median-of-5, spread ≤ 3.1% (the FP32 column with the vec
 | `s3_S42_159` (619) | 2.224 s | 1.400 s (1.59x) | 1.160 s (1.92x) |
 | `diamond233` (776) | 2.343 s | 1.241 s (1.89x) | 1.069 s (2.19x) |
 
+**Update (2026-10-21, `26984c0`):** the tridiagonal reduction now runs on a full, padded copy of the matrix without
+exploiting symmetry (Accelerate's `dgemv 'T'` reads 2–3× faster than the symmetric product; `XTB_SCC_TRD=sym` restores
+the old path). Both gate sets 174/174; single points 1.5–11.8% faster than the table above's `diagonalization` column
+(1 thread), 1.1–10.3% at 2 threads. Against production, 1 thread: `t2_R` 1.67x, `facet_closed` 1.79x, `s12_C31` 1.55x,
+`facet_dbpair_tool` 1.66x, `s3_S42_159` 1.81x, `diamond233` 1.93x. The copy itself costs 0.26–0.41% of a cycle.
+`diag/production` doesn't have this yet.
+
 Where it comes from (each step passes both gate sets): #1465 integrals, #1466 SCC linear algebra, #1464 dispersion
 gradient (upstream PRs by g8j39, merged), multipole moments summed per atom pair (`6c4b68f`, −3.5–5.5%), and a
 tridiagonal reduction with a NEON symmetric matrix-vector product (`e891e78`, −9–13%).
