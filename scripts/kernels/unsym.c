@@ -185,6 +185,12 @@ static void components(int reps) {
 }
 
 // ---- part 2: whole reduction ----
+static void load_d(double *A, lint lda, const double *H, lint n) {
+  for (lint j = 0; j < n; j++) memcpy(A + (size_t)j * lda, H + (size_t)j * n, n * 8);
+}
+static void load_s(float *A, lint lda, const float *H, lint n) {
+  for (lint j = 0; j < n; j++) memcpy(A + (size_t)j * lda, H + (size_t)j * n, n * 4);
+}
 static void reduction(const char *path, int reps) {
   FILE *f = fopen(path, "rb");
   int n4; fread(&n4, 4, 1, f); lint n = n4; size_t nn = (size_t)n * n;
@@ -200,11 +206,16 @@ static void reduction(const char *path, int reps) {
   // UNSYM_OFFSET (bytes, default 0) shifts the matrix and workspace from malloc's page alignment, e.g. 32 as in a
   // Swift array (elements start 32 bytes after the allocation).
   size_t off = getenv("UNSYM_OFFSET") ? (size_t)atoi(getenv("UNSYM_OFFSET")) : 0;
+  // UNSYM_PAD=1 rounds the leading dimension up to a multiple of 64 bytes (8 doubles / 16 floats).
+  int pad = getenv("UNSYM_PAD") && atoi(getenv("UNSYM_PAD"));
+  lint ldd = pad ? (n + 7) / 8 * 8 : n, lds = pad ? (n + 15) / 16 * 16 : n;
+  nn = (size_t)(ldd > lds ? ldd : lds) * n;
   double *A = (double *)((char *)malloc(nn * 8 + off) + off), *d = malloc(n * 8), *e = malloc(n * 8),
          *tau = malloc(n * 8), *work = (double *)((char *)malloc(n * 32 * 8 + off) + off);
   float *As = (float *)((char *)malloc(nn * 4 + off) + off), *ds = malloc(n * 4), *es = malloc(n * 4),
         *taus = malloc(n * 4), *works = (float *)((char *)malloc(n * 32 * 4 + off) + off);
-  printf("  matrix address mod 4096: %zu, workspace mod 4096: %zu\n", (size_t)A % 4096, (size_t)work % 4096);
+  printf("  matrix address mod 4096: %zu, workspace mod 4096: %zu, lda FP64 %d FP32 %d\n", (size_t)A % 4096,
+         (size_t)work % 4096, ldd, lds);
   double *ts[2][2], ev[2][2][1000];
   for (int p = 0; p < 2; p++) for (int s = 0; s < 2; s++) ts[p][s] = malloc(reps * 8);
   printf("Part 2: %s  n = %d, median of %d (ms)\n", path, n, reps);
@@ -213,8 +224,8 @@ static void reduction(const char *path, int reps) {
       if (mode == 0) {
         for (int r = -1; r < reps; r++) for (int sym = 1; sym >= 0; sym--) {
           double t0;
-          if (prec == 0) { memcpy(A, H, nn * 8); t0 = now(); sytrd_d(n, A, n, d, e, tau, work, sym); }
-          else { memcpy(As, Hs, nn * 4); t0 = now(); sytrd_s(n, As, n, ds, es, taus, works, sym); }
+          if (prec == 0) { load_d(A, ldd, H, n); t0 = now(); sytrd_d(n, A, ldd, d, e, tau, work, sym); }
+          else { load_s(As, lds, Hs, n); t0 = now(); sytrd_s(n, As, lds, ds, es, taus, works, sym); }
           if (r >= 0) ts[prec][sym][r] = 1e3 * (now() - t0);
           if (r == reps - 1) {
             if (prec == 0) { dsterf_(&n, d, e, &info); for (lint k = 0; k < n; k++) ev[prec][sym][k] = d[k]; }
@@ -224,8 +235,8 @@ static void reduction(const char *path, int reps) {
       } else {
         for (int sym = 1; sym >= 0; sym--) for (int r = -1; r < reps; r++) {
           double t0;
-          if (prec == 0) { memcpy(A, H, nn * 8); t0 = now(); sytrd_d(n, A, n, d, e, tau, work, sym); }
-          else { memcpy(As, Hs, nn * 4); t0 = now(); sytrd_s(n, As, n, ds, es, taus, works, sym); }
+          if (prec == 0) { load_d(A, ldd, H, n); t0 = now(); sytrd_d(n, A, ldd, d, e, tau, work, sym); }
+          else { load_s(As, lds, Hs, n); t0 = now(); sytrd_s(n, As, lds, ds, es, taus, works, sym); }
           if (r >= 0) ts[prec][sym][r] = 1e3 * (now() - t0);
         }
       }

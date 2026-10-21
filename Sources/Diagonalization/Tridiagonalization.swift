@@ -5,7 +5,8 @@
 // a time. Everything else calls Accelerate's legacy BLAS/LAPACK.
 //
 // symmetric = false is the same reduction without exploiting symmetry: the full matrix (both triangles) is read and
-// updated, with gemv, gemm and ger in place of symv, syr2k and syr2, at twice the work. It is the baseline for the
+// updated, with gemv, gemm and ger in place of symv, syr2k and syr2, at twice the work. The gemv is 'T' (A^T x = A x):
+// Accelerate's dgemv 'N' reads 2-3x slower than 'T' (scripts/kernels/gemv_bw.c). It is the baseline for the
 // successive band reduction work, which doesn't exploit symmetry either. Same Householder vectors up to rounding.
 //
 // Matrices are column-major. Indices in the LAPACK routines are 1-based, as in the Fortran and the C port.
@@ -311,7 +312,7 @@ func latrdUpper<T: TridiagonalScalar>(
       if symmetric {
         symmetricMatrixVector(im1, 1, a, lda, a + at(1, i, lda), w + at(1, iw, ldw))
       } else {
-        T.gemv("N", im1, im1, 1, a, lda, a + at(1, i, lda), 1, 0, w + at(1, iw, ldw))
+        T.gemv("T", im1, im1, 1, a, lda, a + at(1, i, lda), 1, 0, w + at(1, iw, ldw))
       }
       if i < n {
         let m = n - i
@@ -342,7 +343,7 @@ func sytd2Upper<T: TridiagonalScalar>(
       if symmetric {
         symmetricMatrixVector(i, taui, a, lda, a + at(1, i + 1, lda), tau)
       } else {
-        T.gemv("N", i, i, taui, a, lda, a + at(1, i + 1, lda), 1, 0, tau)
+        T.gemv("T", i, i, taui, a, lda, a + at(1, i + 1, lda), 1, 0, tau)
       }
       let alpha = -0.5 * taui * T.dot(i, tau, a + at(1, i + 1, lda))
       T.axpy(i, alpha, a + at(1, i + 1, lda), tau)

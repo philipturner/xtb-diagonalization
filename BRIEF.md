@@ -282,7 +282,14 @@ Steps:
    64 bytes (n = 448, 512, 776 in FP64). Our NEON `symv` reads ~50 GB/s flat, Accelerate's `xsymv` 15–30. With
    `'T'` in the unsymmetrized C reduction (`UNSYM_GEMV=T`), unsymmetrized / symmetric becomes FP64 1.11/0.83/1.14/0.97
    and FP32 1.06/0.75/1.18/0.98 at n = 412/448/619/776: unsymmetrized FP64 at n = 448 is faster than our symmetric
-   reduction (3.78 vs 4.54 ms). The Swift baseline still uses `'N'`; switching it is a one-line change, not yet made.
+   reduction (3.78 vs 4.54 ms). The Swift baseline uses `'T'` since 2026-10-21 (Swift, lda = n, unsymmetrized /
+   symmetric: FP64 1.20/0.87/1.15/0.99, FP32 1.15/0.86/1.27/1.04 at n = 412/448/619/776).
+   **Padding the leading dimension to a multiple of 64 bytes** (`unsym.c`, `UNSYM_PAD=1`) makes the unsymmetrized `'T'`
+   reduction faster than the symmetric one at every size: FP64 0.87/0.85/0.81/0.98 (n = 412: 3.05 vs 3.49 ms; n = 619:
+   8.70 vs 10.71 ms), FP32 0.82/0.79/0.95/0.93; padding alone gains the symmetric reduction ≤ 5%. This leaks back to
+   xTB, whose SCC uses the symmetric reduction (`sytrd.c`): estimated 4–7% per single point at n = 412–619 before the
+   cost of the extra copy. Not done: xTB's congruence (#1466) writes only the upper triangle, so it needs a mirrored,
+   padded copy each cycle, and `dormtr` must read the padded matrix.
    Raw AMX programming is shelved unless this kind of gap turns out to matter.
 2. **End-to-end harness:** reduce → `dstedc` → back-transform m eigenvectors on the dumped GFN2 matrices, per-stage
    times (the draft's breakdown); baselines: unsymmetrized and symmetric 1-stage + `dormtr`. Correctness: eigenvalues
@@ -290,15 +297,21 @@ Steps:
 3. **2-stage:** dense → band (trailing block only) and band → tridiagonal, both back-transformations; sweep b = 8–64.
 4. **3-stage:** general band → band stage, configuration `[b1, b2]`; sweep (b1, b2).
 5. **Throughput:** jobs per second with 8 processes × 1 thread against the 1-stage reduction.
-6. **Later, only once benchmarks show they matter** (user, 2026-10-21): get code that works first, measure, then decide.
-   - A specialized path for the last stage (b_out = 1), possibly code generalized from larger block sizes inlined
-     for small ones.
-   - Updating only the trailing block instead of the full n × n matrix (the draft's ~3× redundant work).
-   - Exploiting symmetry (half the work), band storage.
-   - Choosing the block sizes jointly; an optimization should help all block sizes, or at least not hurt the
-     important range.
-   - NEON kernels for the small bulge blocks, pipelining between stages.
-   Expect FP64 and FP32 to behave differently throughout.
+6. **Block sizes first, then the deferred optimizations** (user, 2026-10-21). Get code that works, then:
+   - **Find the relevant block-size range:** sweep b (2-stage) and (b1, b2) (3-stage) on the unoptimized code and keep
+     the Pareto-optimal region (time against n = 412–776 and the stage count), with some margin. The range is coupled
+     to the optimizations below and can't be known for certain until they're done; the sweep gives the range to check,
+     not the final choice.
+   - **Each optimization behind a runtime Boolean** in the Swift code, at negligible cost when off (a parameter of the
+     always-inlined routines, as `symmetric` is for the 1-stage reduction), so on/off is one benchmark run each and
+     the block-size range can be re-swept with any combination.
+   - **Check each optimization over the whole range:** it should help every relevant block size, or at least not
+     hurt the important part of the range. If this turns into benchmarking for its own sake, drop it for a quick
+     spot check at the current best b.
+   - The deferred optimizations: a specialized path for the last stage (b_out = 1), possibly code generalized from
+     larger block sizes inlined for small ones; updating only the trailing block instead of the full n × n matrix (the
+     draft's ~3× redundant work); exploiting symmetry (half the work), band storage; NEON kernels for the small bulge
+     blocks; pipelining between stages. Expect FP64 and FP32 to behave differently throughout.
 7. **Into xTB:** a C entry point for the whole eigensolve (the current `XTB_SYTRD_LIBRARIES` hook only replaces the
    reduction), then both gate sets.
 

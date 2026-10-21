@@ -147,3 +147,9 @@
   With `'T'` the unsymmetrized C reduction is 0.83–1.14× the symmetric one in FP64 (n = 448: 3.78 vs 4.54 ms) and
   0.75–1.18× in FP32. Swift baseline left on `'N'` for now. User's deferral list (b_out = 1 specialization, trailing-
   block updates, symmetry, joint block sizes) recorded in BRIEF Phase 4 step 6: only after first benchmarks.
+- **Swift baseline switched to `'T'`.** Unsymmetrized / symmetric (Swift, lda = n) FP64 1.20/0.87/1.15/0.99, FP32
+  1.15/0.86/1.27/1.04 at n = 412/448/619/776. With the leading dimension padded to 64 bytes (C, `UNSYM_PAD=1`,
+  blocked, median of 21): FP64 0.87/0.85/0.81/0.98, FP32 0.82/0.79/0.95/0.93, faster than the symmetric reduction at
+  every size (n = 619 FP64: 8.70 vs 10.71 ms). Candidate for xTB (~4–7% per single point, estimated, before the cost
+  of mirroring the upper triangle the congruence writes); not implemented. BRIEF Phase 4 step 6 reordered: block-size
+  range first, each optimization behind a runtime Boolean, checked over that range.
