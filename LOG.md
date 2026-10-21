@@ -77,3 +77,7 @@
   faster at n ≤ 448 and 3–7% slower at n ≥ 619; not merged.
 - **Broyden damping** (`diag/broyden`, `5684b47`): 0.25 cuts cycles 13.6% over the grid but changes one SCF solution
   (`facet_bare_dimer` u0 100 K, +3.0 mEh) and slows others; not usable as a default.
+- **mmompop by atom pairs** (`6c4b68f`): population stage −40% per cycle, single points −3.5–5.5%; gates pass.
+- **Vectorized tridiagonal reduction** (`e891e78`, `src/mctc/lapack/sytrd.c`): LAPACK's dsytrd ported with a NEON
+  symmetric matrix-vector product (~50 vs ~30 GB/s); dsytrd −30%, single points −9–13%; gates pass, cycles unchanged.
+  An 8-column kernel variant gains little at n ≈ 450 (not used).
