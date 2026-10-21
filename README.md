@@ -18,4 +18,8 @@ git clone --recurse-submodules https://github.com/philipturner/xtb-diagonalizati
   (`--accuracy`, `--threads` for validation runs).
 - `scripts/compare.py`: checks a run against the accuracy gates; `bench.py`, `sweep.py`, `warmstart.py`, `noise.py`:
   timing, throughput, warm starts, SCC noise floor; `scripts/kernels/`: eigensolver kernel studies.
+- `Package.swift`, `Sources/`: Swift kernels for prototyping (`Diagonalization`: the tridiagonal reduction of
+  `sytrd.c`, bit-identical to it without FP contraction) and `sytrd-bench`. `scripts/build_xtb_swift.sh` links them into
+  `libxtb.dylib` in place of `sytrd.c` (xtb's `XTB_SYTRD_LIBRARIES`); `swift build` needs `--disable-sandbox` inside
+  Claude Code.
 - `FINDINGS.md`: answers to the brief's questions; `baseline.md`: Phase 1 measurements; `LOG.md`: session log.

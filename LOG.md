@@ -97,3 +97,24 @@
 - **Stopped here.** Remaining safe per-single-point gains are each ≤ 5% (H build, potential, work outside the loop);
   `dstedc`'s scalar root finder can't be sped up from outside Accelerate. Next steps are the user's decisions in
   `FINDINGS.md`: FP32 safeguard, SCC accelerator, handover of `diag/production` (needs a Swift check), pushes.
+
+## 2026-10-21 — Eigensolve share at the tip; Swift port of the tridiagonal reduction
+
+- **Eigensolve share** on `aa5ecd7` (timers, 1 thread, median of 5; `build/share-tip.json`): 68% at n = 412, 74% at
+  419, 73% at 448, 77% at 619, 69% at 776 (61% at 124); production had 56–69%. Outside the SCC loop 6–16%, rest of the
+  loop 16–20%. 2x over production per single point needs the eigensolve ~25–32% faster at n = 412–448.
+- **Phase 4 clarification:** the two-stage checks used Accelerate's own `$NEWLAPACK` routines only; swift-xtb's Swift
+  stages were never ported or timed.
+- **Swift port of `sytrd.c`** (root `Package.swift`; `Sources/Diagonalization`, `Sources/SytrdBench`): generic over
+  FP64/FP32, NEON multiply-add through a C header (`Sources/CSIMD`; Swift's `SIMD.addingProduct` compiled to scalar
+  `fmadd`). Bit-identical, FP64 and FP32, to `sytrd.c` built with `-ffp-contract=off` (GCC 16 and clang) on four
+  dumped matrices; GCC and clang with contraction on fuse some scalar multiply-adds but not their vectorized in-order
+  reductions, so the libxtb build differs at rounding (eigenvalues 2e-13 Eh). Reduction time vs Accelerate
+  (`sytrd-bench`, median of 21, round-robin, n = 412/448/619/776): FP64 C 1.38/1.39/1.42/1.34x, Swift
+  1.42/1.42/1.41/1.33x; FP32 C 1.78/1.69/1.80/1.67x, Swift 1.77/1.66/1.84/1.68x (Swift/C 0.97–1.02).
+- **Library workflow:** xtb `07b6e25` adds `XTB_SYTRD_LIBRARIES` (default: unchanged build, 174/174 bit-identical);
+  `scripts/build_xtb_swift.sh` links the Swift static library into `build/xtb-build-swift/libxtb.dylib` (no Swift
+  runtime dependency at present; still one file). Gates: phase2 174/174, tight 174/174 (vs the C tip: |dE| ≤ 6.4e-10,
+  max|dg| ≤ 4.0e-7). Single points (`bench.py`, two alternating rounds): Swift/C 0.996–1.010.
+- **Next:** prototype the two-stage reduction in `Sources/Diagonalization` against `sytrd-bench`; needs its own
+  back-transformation entry point (the current hook only replaces `xtb_dsytrd_upper`).
