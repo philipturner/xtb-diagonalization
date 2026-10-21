@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cold vs warm SCF starts along a scan, through the C API with production settings (accuracy 1, maxiter 250).
 
-  python3 scripts/warmstart.py LIB OUT.json [--cases id:uhf:to,...] [--points 21] [--etemp 300]
+  python3 scripts/warmstart.py LIB OUT.json [--cases id:uhf:to,...] [--points 21] [--etemp 300] [--accuracy 1]
 
 The scan interpolates linearly from structures/<id>.xyz (t = 0) to structures/<to>.xyz (t = 1), e.g. a structure and
 its _rms15 copy. Every point is computed three ways:
@@ -33,6 +33,7 @@ def main():
     cases = [c.split(':') for c in (a[a.index('--cases') + 1] if '--cases' in a else DEFAULT).split(',')]
     npt = int(a[a.index('--points') + 1]) if '--points' in a else 21
     etemp = float(a[a.index('--etemp') + 1]) if '--etemp' in a else 300.0
+    acc = float(a[a.index('--accuracy') + 1]) if '--accuracy' in a else 1.0
     L = C.CDLL(lib)
     for f in ('xtb_newEnvironment', 'xtb_newCalculator', 'xtb_newResults', 'xtb_newMolecule', 'xtb_copyResults'):
         getattr(L, f).restype = C.c_void_p
@@ -50,7 +51,7 @@ def main():
                                           (C.c_double * (3 * n))(*(x0 / 0.52917721067).ravel()),
                                           C.byref(C.c_double(0.0)), C.byref(C.c_int(uhf)), None, None))
         calc = C.c_void_p(L.xtb_newCalculator()); L.xtb_loadGFN2xTB(env, mol, calc, None)
-        L.xtb_setAccuracy(env, calc, C.c_double(1.0)); L.xtb_setElectronicTemp(env, calc, C.c_double(etemp))
+        L.xtb_setAccuracy(env, calc, C.c_double(acc)); L.xtb_setElectronicTemp(env, calc, C.c_double(etemp))
         L.xtb_setMaxIter(env, calc, C.c_int(250))
         L.xtb_releaseOutput(env)
 
@@ -103,7 +104,7 @@ def main():
         os.unlink(log)
         tot = {m: sum(p[m]['cycles'] or 0 for p in pts) for m in ('cold', 'chain', 'seed')}
         print(f"{sid}: total cycles {tot}; seed point t=0 cold {s0['cycles']}", flush=True)
-        results.append(dict(id=sid, uhf=uhf, to=to, etemp_K=etemp, points=pts, total_cycles=tot))
+        results.append(dict(id=sid, uhf=uhf, to=to, etemp_K=etemp, accuracy=acc, points=pts, total_cycles=tot))
     json.dump(dict(library=lib, cases=results), open(out, 'w'), indent=1)
 
 

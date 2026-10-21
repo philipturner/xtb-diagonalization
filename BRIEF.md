@@ -187,7 +187,7 @@ The deliverable is a reproducible baseline that every later phase is measured ag
 
 These are reformulations: exact in exact arithmetic, but they change rounding, and the SCC carries rounding differences up to the size of its own convergence noise. Phase 1 measured this on an upstream reformulation (v6.7.1's full `dsygvd` against main's cached factor): energies moved by up to 7.9e-8 Eh, 124 of 174 runs by more than 1e-10. So they are gated at the measured noise floor like every phase, with a tighter cycle-count rule (Validation). Expect a few percent, not a multiple; their main value is a clean place to hook Phase 3.
 
-0. **Noise floor on the whole grid.** Phase 1 measured it on three 300 K scans only. Before using the gates, measure it for every `reference/` run: rerun each single point starting from the converged result of the same structure and spin state at the neighbouring electronic temperature (`xtb_copyResults`), which changes only the SCC trajectory, and take per-quantity maxima over runs that reach the same SCF solution. If any maximum exceeds half of its gate, raise the gate and record why.
+0. **Noise floor on the whole grid.** Phase 1 measured it on three 300 K scans only. Before using the gates, measure it for every `reference/` run: rerun each single point starting from the converged result of the same structure and spin state at the neighbouring electronic temperature (`xtb_copyResults`), which changes only the SCC trajectory, and take per-quantity maxima over runs that reach the same SCF solution. Use several perturbed starts per run (both neighbouring temperatures, and a seed from the `_rms05` copy where one exists) and store each run's maxima (`build/noise/`): they set the per-run gradient limit (Validation). Report any run whose gradient noise exceeds 4.8e-5 Eh/bohr, and any other quantity whose noise exceeds half its gate, before relying on the gates. Also produce the tight-accuracy production results for the second check.
 1. **Cached Cholesky.** Already in production (master factors S once per geometry). Measured saving against v6.7.1: 1–4% at n ≤ 619 (`baseline.md`). Nothing left to do.
 2. **GEMM-based transform.** Replace `dsygst` + `dtrsm` in `mctc_dsygvd_factorized` with a matrix X formed once per geometry, X = U⁻¹ from the Cholesky factor. Each cycle becomes H′ = Xᵀ H X (two GEMMs, or `dsymm` + `dgemm`), `dsyevd` on H′, then C = X C′ (one GEMM). These moves \~7% of runtime onto matrix-unit-friendly GEMMs. Measure; don't assume it's faster at small n.
 3. **One hook point.** Route every eigensolve through a single new subroutine that receives the cycle number, the previous eigenvectors and eigenvalues, and the factor X. Phase 3 changes only this routine.
@@ -243,7 +243,7 @@ The gates are set against the SCC's own convergence noise, measured in Phase 1: 
 | Quantity | Noise floor: max (95th percentile), 120 warm-start runs, 3 systems, 300 K | Gate, all phases | Gate / max noise |
 | --- | --- | --- | --- |
 | Total energy, \|ΔE\| | 1.2e-7 (8e-8) Eh | ≤ 5e-7 Eh | 4x (half the SCC energy criterion, 1e-6 Eh at accuracy 1.0) |
-| Gradient, max \|Δg\| | 5.4e-5 (3e-5) Eh/bohr | ≤ 2e-4 Eh/bohr (0.010 eV/Å) | 4x |
+| Gradient, max \|Δg\| | 5.4e-5 (3e-5) Eh/bohr = 4.4 (2.5) pN | ≤ 6e-5 Eh/bohr (4.9 pN), then per run (below) | 1.1x |
 | HOMO–LUMO gap | 9.3e-6 (4e-6) Eh | ≤ 5e-5 Eh (1.4 meV) | 5x |
 | Atomic charges, max \|Δq\| | 2.9e-4 (1.4e-4) e | ≤ 1e-3 e | 3x |
 | Occupations, max \|Δf\| (same SCF solution) | 1.1e-3 (6e-4) | ≤ 5e-3 | 5x |
@@ -255,6 +255,11 @@ The phases differ in SCC cycles only:
 | SCC cycles per run | At most 2 more than `reference/` | At most 10% (and at least 2) more than `reference/` |
 | SCC cycles, total over the grid | Within ±1% of `reference/` | Reported; the wall-time gain is what counts |
 | Convergence | Every run that converges in `reference/` still converges | Same |
+
+**The gradient gate is kept as small as the noise allows** (the user's priority: forces matter at the pN level; 1 Eh/bohr = 82.4 nN). It can't go below the noise at production accuracy without rejecting correct methods, and SCC thresholds are never changed for production runs. Two refinements make it tighter where the data allow:
+
+- **Per-run limit.** Once Phase 2 step 0 has measured each run's own noise, a run's gradient gate is 1.25x its measured noise, never above the global 6e-5 Eh/bohr. Well-behaved systems then get a tighter gate than the noisiest one sets. A run whose measured noise exceeds 4.8e-5 Eh/bohr (so 1.25x would pass 6e-5) is reported to the user, not silently accommodated.
+- **Method error without the noise.** As a second, stricter check, rerun the candidate and the production library at a tight accuracy (`xtb_setAccuracy` 0.01) and compare those two: there the difference is the method's own error. Measured on the noisiest scan (`s12_C31`, 6 points, chained and seeded vs cold): at accuracy 0.01 the gradient noise drops from 4.2e-5 to 2.8e-7 Eh/bohr (0.02 pN) and the energy noise from 1.2e-7 to 1e-11 Eh, for about 17% more SCC cycles. Gate at that setting: max |Δg| ≤ 1e-6 Eh/bohr (0.08 pN), |ΔE| ≤ 1e-9 Eh. This is a validation setting only; production keeps accuracy 1.0. The tight-accuracy production results go under `build/` (or a new `reference-tight/`), never into `reference/`.
 
 Different SCF solutions differ by far more than these gates (for example `facet_dbpair` uhf 0: gap 0.02 eV at 100 K, 1.51 eV at 300 K; occupations change by O(1)), so the gates still catch a move to another solution. A Phase 2 change whose differences approach the gates is suspect even if it passes: in Phase 1, the upstream v6.7.1 → main change stayed below 7.9e-8 Eh, 2.1e-6 Eh in gap, 2.0e-5 e in charges and 5.7e-4 in occupations, under a quarter of each gate. The noise floor comes from three 300 K scans at production uhf; Phase 2 step 0 extends it to the full grid. `scripts/compare.py` implements these gates.
 

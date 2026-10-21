@@ -4,7 +4,8 @@
   python3 scripts/compare.py DIR [--gates phase2|approx|identical] [--ref REFDIR] [--all]
 
 Gates (BRIEF.md, Validation), set against the measured SCC noise floor and the same for every phase:
-|dE| <= 5e-7 Eh, max|dg| <= 2e-4 Eh/bohr, gap 5e-5 Eh, charges 1e-3 e, occupations 5e-3.
+|dE| <= 5e-7 Eh, max|dg| <= 6e-5 Eh/bohr (4.9 pN), gap 5e-5 Eh, charges 1e-3 e, occupations 5e-3.
+Per-run gradient limits from the Phase 2 noise-floor measurement are not wired in yet.
 phase2    = Phase 2 (reformulation): at most 2 more SCC cycles per run, total cycles within +-1%.
 approx    = Phases 3-4: at most 10% (and at least 2) more SCC cycles per run.
 identical = bit-for-bit: every difference 0 and every cycle count equal (e.g. a build that only adds timers).
@@ -15,7 +16,7 @@ import json, os, sys
 import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-NOISE_GATES = dict(E=5e-7, g=2e-4, gap=5e-5, q=1e-3, occ=5e-3)
+NOISE_GATES = dict(E=5e-7, g=6e-5, gap=5e-5, q=1e-3, occ=5e-3)
 GATES = {'phase2': dict(NOISE_GATES, extra_it=lambda r: 2, total_it=0.01),
          'approx': dict(NOISE_GATES, extra_it=lambda r: max(2, int(0.1 * r)), total_it=None),
          'identical': dict(E=0.0, g=0.0, gap=0.0, q=0.0, occ=0.0, extra_it=lambda r: 0, total_it=0.0)}

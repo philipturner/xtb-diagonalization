@@ -29,9 +29,13 @@
   Cholesky) already in production; pseudodiag answer; pushing is the user's step (permissions now deny `git push`,
   including `git -C … push`: both tested and blocked).
 - **Gates reset to the measured noise floor.** Warm-vs-cold maxima over 120 runs: 1.2e-7 Eh, 5.4e-5 Eh/bohr, 9.3e-6 Eh
-  gap, 2.9e-4 e, 1.1e-3 occupations. New gates, all phases: 5e-7 Eh, 2e-4 Eh/bohr, 5e-5 Eh, 1e-3 e, 5e-3; Phase 2
+  gap, 2.9e-4 e, 1.1e-3 occupations. New gates, all phases: 5e-7 Eh, 6e-5 Eh/bohr (4.9 pN; first set at 2e-4 = 16 pN, lowered at the user's request), 5e-5 Eh, 1e-3 e, 5e-3; Phase 2
   ≤ 2 extra cycles per run and total within ±1%, Phases 3–4 ≤ 10% (min 2) extra per run. `compare.py --gates
   phase2|approx|identical`; main passes all three.
 - **Next:** Phase 2 step 0, the noise floor on the full 174-run grid (warm start from the neighbouring temperature),
   then the GEMM-based transform and the hook point. CLAUDE.md still says pushing `diagonalization` is allowed: the
   user decides whether to change it.
+- **Gradient gate lowered** to 6e-5 Eh/bohr (4.9 pN; noise max 5.4e-5 = 4.4 pN), with per-run limits (1.25x each run's
+  own noise) once Phase 2 step 0 measures them, plus a second check at accuracy 0.01, where the noise is 150x
+  smaller (s12_C31: gradient 2.8e-7 Eh/bohr, energy 1e-11 Eh): method error there ≤ 1e-6 Eh/bohr (0.08 pN).
+  `warmstart.py --accuracy`. CLAUDE.md push rule changed: Claude commits, the user pushes.

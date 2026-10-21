@@ -11,8 +11,9 @@ plan and the acceptance criteria; read it in full at the start of each session, 
 - xTB source changes go on the public branch `diagonalization` of the `xtb/` submodule (fork github.com/philipturner/xtb;
   remote `upstream` = grimme-lab/xtb), one commit per step with its measurement in the message, plus the matching
   submodule-pointer commit here. Never commit to the fork's `main`: it only fast-forwards to upstream `main`
-  (`git -C xtb push origin upstream/main:main`). Pushing `diagonalization` is allowed; never force-push it (merge
-  upstream, don't rebase). Ask the user before pull requests upstream or any other outward-facing step.
+  (the user runs `git -C xtb push origin upstream/main:main`). Claude commits; the user pushes (permissions deny
+  `git push` in every form). `diagonalization` is never force-pushed (merge upstream, don't rebase). Ask the user before
+  pull requests upstream or any other outward-facing step.
 - Cold SCF is the default (fresh results object per single point). Warm starts (chained handle, or one fixed seed as in
   swift-xtb's `xTB_Seed`) are an optional engineering variable: report them separately, never in place of cold numbers.
 - Never loosen SCC convergence thresholds. Report measured numbers only; say plainly what could not be measured.
