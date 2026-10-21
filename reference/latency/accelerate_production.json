@@ -1,0 +1,50 @@
+{
+ "library": "/Users/philipturner/Documents/MolecularRenderer/claude-molecular-renderer/libxtb.dylib",
+ "cases": {
+  "t2_R": {
+   "uhf": 1,
+   "n_atoms": 37,
+   "median_s": 0.044957707985304296,
+   "min_s": 0.04486970801372081,
+   "max_s": 0.04504774999804795,
+   "energy_Eh": -37.82924487149156,
+   "clean": true
+  },
+  "facet_closed": {
+   "uhf": 0,
+   "n_atoms": 92,
+   "median_s": 0.5650261660339311,
+   "min_s": 0.5564904999919236,
+   "max_s": 0.5689433329971507,
+   "energy_Eh": -94.84445968946227,
+   "clean": true
+  },
+  "facet_dbpair_tool": {
+   "uhf": 1,
+   "n_atoms": 105,
+   "median_s": 1.076718374970369,
+   "min_s": 1.0642028750153258,
+   "max_s": 1.0943194580031559,
+   "energy_Eh": -110.80615876896015,
+   "clean": true
+  },
+  "s3_S42_159": {
+   "uhf": 1,
+   "n_atoms": 159,
+   "median_s": 2.1980995839694515,
+   "min_s": 2.1666824580170214,
+   "max_s": 2.219560584053397,
+   "energy_Eh": -179.65968050916604,
+   "clean": true
+  },
+  "diamond233": {
+   "uhf": 0,
+   "n_atoms": 275,
+   "median_s": 2.341908834001515,
+   "min_s": 2.312439583998639,
+   "max_s": 2.38417383300839,
+   "energy_Eh": -412.06436163657617,
+   "clean": true
+  }
+ }
+}
