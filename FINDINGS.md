@@ -140,7 +140,8 @@ production library at the same accuracy), and production accuracy only checks sa
 1. Whether FP32 early cycles are worth a safeguard (restart the SCC in FP64 when it stalls): +12–25% per single point,
    but as is it breaks fragile cold runs, including one at 300 K. It stays off by default. For seeded work it added no
    failures over the grid and stacks with the seed (−38.1% together), so enabling it only for seeded single points is
-   an option even without the safeguard.
+   an option even without the safeguard. **Deferred by the user (2026-10-21):** the FP64 fallback and a way for the
+   caller to enable FP32 come later; Phase 4 first.
 2. Whether to push `diagonalization` and `diag/production` (local commits only; the three PRs in them are g8j39's,
    still open upstream), whether to hand `diag/production` over as the production library (after a Swift check), and
    whether to offer `sytrd.c` and the `mmompop` change upstream.

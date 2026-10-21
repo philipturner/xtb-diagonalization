@@ -132,3 +132,5 @@
   known second solution of `facet_closed_rms15` u2 300 K). Cold FP32 loses `facet_bare_dimer` u0 300 K (known) and
   converges `s12_C31` u3 100 K (unconverged in production too); seeded from 100 K, FP32 reaches the cold FP64 solution
   of `facet_bare_dimer` 300 K in 14 cycles (dE 1.2e-8 Eh, max|dg| 8.9e-6). FP64 tip noise matches the main build's.
+- **Decision (user):** FP64 fallback for FP32 and a caller-side switch to enable FP32 are deferred; next is Phase 4
+  (two-stage diagonalizer, to be specified by the user).
