@@ -151,8 +151,11 @@ production library at the same accuracy), and production accuracy only checks sa
    doesn't converge within `XTB_SCC_FP32_MAXITER` cycles (default 160) is rerun from the same start in FP64, which
    reproduces the FP64 result bit for bit. Cold FP32 grid: no convergence failures beyond production's own two; the
    remaining gate failures are cycle counts (the restarted run, and `s12_C31_rms05` u3 100 K +15%). Opt-in; the caller
-   sets the variable (intended around warm-started calls). Open: whether FP32 can become the default for cold runs,
-   which needs the rate of different-SCF-solution outcomes under perturbed cold starts, FP32 vs FP64.
+   sets the variable (intended around warm-started calls). **Decided by the user (2026-10-21): FP32 + restart becomes
+   the default**, with legacy FP64 still selectable; the mechanism (environment variables, C API, or other) and the
+   checks that each mode is actually in effect come later. Basis: no FP32-caused different solution in 657 cold starts
+   (grid + 480 displaced copies of the fragile structures) or 336 seeded ones; 8x1 throughput 1.15-1.25x FP64. The
+   FP64 refinement (`XTB_SCC_FP32_REFINE`) matches FP64 to ~1e-12 Eh but is 0.95-0.98x FP64 at 8x1; it stays opt-in.
 2. Whether to push `diagonalization` and `diag/production` (local commits only; the three PRs in them are g8j39's,
    still open upstream), whether to hand `diag/production` over as the production library (after a Swift check), and
    whether to offer `sytrd.c` and the `mmompop` change upstream.

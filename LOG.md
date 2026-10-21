@@ -350,3 +350,6 @@
   option.
 - **Tooling note:** `make_reference.py --help` isn't help: it started the production run and wrote two missing
   sic_n1788 references into `reference/` (stopped; both deleted; nothing overwritten).
+- **Decision (user):** plain FP32 + restart will be the default, legacy FP64 selectable; how the default is set and
+  checked (results report the mode in effect and any restart, effective settings printed, malformed values rejected,
+  a gate run per mode) is to be worked out later.
