@@ -368,3 +368,10 @@
   bit-identical to its serial result, and the production library (no API: FP64 runs, FP32 request refused).
   Next: Swift bindings (user's branch): dlsym both symbols; missing → FP64, FP32 request traps; set per calculator,
   check the getter after every single point.
+- **Swift bindings** (swift-xtb branch `fp32-diagonalization`, cloned by the user into `swift-xtb/`, commit
+  `41ba777`; not tracked here): `calculator.precision` = `.fp64` (default) or `.fp32(switchThreshold: 1e-3,
+  maximumIterations: 160, refined: false)` through `xtb_setSCCPrecision`; both API symbols load as optionals
+  (`xTB_Library.supportsFP32`; absent → FP64 only and a `.fp32` request traps; only one present traps); values
+  validated in Swift; after every singlepoint `xtb_getSCCPrecision` is checked against the calculator (mismatch
+  traps) and exposed as `calculator.precisionReport`. Tests: 16/16 with the diagonalization library (1 and 8
+  threads); production library 13 pass, 3 FP32 tests skip, `.fp32` traps (checked from a scratch package).
