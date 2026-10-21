@@ -17,6 +17,11 @@ void dsyr2_(const char *uplo, const lint *n, const double *alpha, const double *
 double ddot_(const lint *n, const double *x, const lint *incx, const double *y, const lint *incy);
 void daxpy_(const lint *n, const double *alpha, const double *x, const lint *incx, double *y, const lint *incy);
 void dscal_(const lint *n, const double *alpha, double *x, const lint *incx);
+void dgemm_(const char *transa, const char *transb, const lint *m, const lint *n, const lint *k, const double *alpha,
+            const double *a, const lint *lda, const double *b, const lint *ldb, const double *beta, double *c,
+            const lint *ldc);
+void dger_(const lint *m, const lint *n, const double *alpha, const double *x, const lint *incx, const double *y,
+           const lint *incy, double *a, const lint *lda);
 void dtrmm_(const char *side, const char *uplo, const char *transa, const char *diag, const lint *m, const lint *n,
             const double *alpha, const double *a, const lint *lda, double *b, const lint *ldb);
 
@@ -27,6 +32,11 @@ void ssyr2k_(const char *uplo, const char *trans, const lint *n, const lint *k, 
              const lint *lda, const float *b, const lint *ldb, const float *beta, float *c, const lint *ldc);
 void ssyr2_(const char *uplo, const lint *n, const float *alpha, const float *x, const lint *incx, const float *y,
             const lint *incy, float *a, const lint *lda);
+void sgemm_(const char *transa, const char *transb, const lint *m, const lint *n, const lint *k, const float *alpha,
+            const float *a, const lint *lda, const float *b, const lint *ldb, const float *beta, float *c,
+            const lint *ldc);
+void sger_(const lint *m, const lint *n, const float *alpha, const float *x, const lint *incx, const float *y,
+           const lint *incy, float *a, const lint *lda);
 void saxpy_(const lint *n, const float *alpha, const float *x, const lint *incx, float *y, const lint *incy);
 void sscal_(const lint *n, const float *alpha, float *x, const lint *incx);
 

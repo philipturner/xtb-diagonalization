@@ -225,18 +225,60 @@ Watch two xTB-specific risks:
 
 Report per option: time per cycle, total cycles, total time and every gate's result.
 
-## Phase 4: Two-stage diagonalizer, using swift-xtb as reference
+## Phase 4: Successive band reduction (revised 2026-10-21)
 
-Start this only if, after Phase 3, full diagonalizations are still more than \~25% of runtime. The target is beating Accelerate `dsyevd`, with eigenvectors, at n ≈ 450–750 in FP64. At the production sizes this is the phase least likely to pay off: the Swift FP32 version already lost to dsyevd below n = 416.
+The first version of this phase (benchmark Accelerate's two-stage routines, port the Swift stages) is done as far as
+Accelerate goes: `dsytrd_2stage` doesn't pay at n ≤ 448 and gives no eigenvectors; `ssyevd_2stage` is accurate
+(`FINDINGS.md`). The user's direction for the rest of the phase:
 
-1. **Benchmark first.** Time Accelerate `dsyevd` against reference LAPACK's two-stage routines at n = 400, 776 and 1,000, eigenvalues and eigenvectors. Separately check whether the `ssyevd_2stage_` inaccuracy noted in the README reproduces; it may be a bug in Accelerate.
-2. **Port the Swift stages to FP64**, either as Fortran/C in the xTB tree or as a Swift dylib exposing a C ABI via `@_cdecl`. Use `DiagonalizationTests.swift` as the correctness spec.
-3. **Fix the known inefficiencies** before benchmarking the port:
-   - Restrict the band-form trailing GEMM to the shrinking (n − k) block; it currently spans the full n × n every panel.
-   - Exploit symmetry in the trailing update (a `syr2k`-style update).
-   - Sweep block size. The README's AMX table shows `sgemm_` at 566 GFLOPS for 32-wide blocks versus \~1,000 at 256–512. The best band width trades that against bulge-chasing cost, which grows with band width.
-4. **Profile each stage** with the five-way breakdown already in `OptimizingDiagonalization.md`, and compare against `DSYTRD` + `DSTEDC` + `DORMTR` from the baseline.
-5. **Plug it into the Phase 2 hook** behind a flag, so it can be used for the full-solve cycles while Phase 3 handles the rest.
+- **Successive band reduction (SBR)** generalizes two-stage tridiagonalization. 1-stage (best below n ≈ 100): dense →
+  tridiagonal. 2-stage (best at n ≈ 100–800): dense → band b → tridiagonal; the best b moved with n in swift-xtb
+  (8, 16, 32, larger at larger n). 3-stage (expected best above n ≈ 800, perhaps a general answer to the block-size
+  problem): dense → b1 (large, outer) → b2 (small, inner) → tridiagonal, at the cost of one more back-transformation.
+- **One code base:** 3-stage reduces to 2-stage at no runtime cost by a setting in a configuration descriptor (from C or
+  Fortran, one exported symbol per variant if needed). 1-stage may stand alone; ideally it is what 2-stage does inside a
+  single b × b block.
+- **Don't exploit symmetry** during development (it halves the work but is unrelated to the stage count and adds
+  complexity). The fair baseline is our 1-stage reduction without symmetry (`tridiagonalize(..., symmetric: false)`).
+- **Watch multi-process throughput.** The extra back-transformation work is many small GEMMs (8×8×32, 8×32×32) on the
+  AMX; with 8 processes they may contend and lose throughput even when one process gets faster. Single-thread latency
+  still matters for work that can't run as parallel SCF invocations.
+- **Pipelining** (bulge chasing starting halfway through the band reduction, D&C during the last sweeps) is a later
+  optimization: it helps single-run latency, not parallel throughput.
+
+Reference: the draft in `philipturner/nanotech-code-archive` `swift-xtb/Sources/LinearAlgebra` (cloned read-only into
+`build/nanotech-code-archive`): FP32, row-major; band reduction with one-sided panel factorization + compact WY
+(T built in small blocks of `smallBlockSize`); bulge chasing one reflector per bulge with `sgemm_`/`sger_` calls on
+windows of ~3b × b; back-transformation of the bulge reflectors grouped b sweeps at a time into 2b × b WY blocks; band
+back-transformation one GEMM chain per panel. Inefficiencies to avoid: every panel updates the full n × n matrix
+(left and right) instead of the shrinking trailing block (about 3× the flops, before symmetry); the band
+back-transformation also spans all n rows; per-call array allocations; BLAS call overhead on the ≤ 32-wide bulge
+kernels (NEON beats Accelerate below 8 × 8, `DenseDiagonalizationExperiment/README.md`).
+
+Design for this repository (`Sources/Diagonalization`, generic FP64/FP32, column-major, FP64 first):
+- **A stage is a band reduction b_in → b_out.** The configuration is the list of intermediate bandwidths: `[]` is
+  1-stage (the `sytrd` path), `[b]` 2-stage, `[b1, b2]` 3-stage; the driver loops over stages, so 2-stage is 3-stage
+  with one stage fewer. Dense → band: panel QR (valid one-sided while the panel width ≤ b_out) plus a two-sided
+  trailing update by GEMM on the trailing block only. Band → band, b_out ≥ 1: Bischof–Lang–Sun bulge chasing; b_out = 1
+  with one-column panels is the classical bulge chase of the draft.
+- **Storage:** the full n × n matrix during development (no band storage, no symmetry).
+- **Back-transformation** per stage in reverse order, reflectors grouped into WY blocks. Only the eigenvectors xTB uses
+  need back-transforming (#1466 back-transforms the occupied block only), so its cost scales with that column count.
+- **D&C:** Accelerate's `dstedc`, unchanged.
+
+Steps:
+1. **Baseline (done):** `tridiagonalize(symmetric: false)`, gemv/gemm/ger on the full matrix. FP64: 1.39–1.76× the
+   time of the symmetric Swift reduction at n = 412–776 (n = 448: 8.16 vs 4.64 ms; Accelerate `dsytrd` 6.63 ms).
+   FP32: 0.95–1.10× (Accelerate's full `sgemv`/`sgemm` are as fast as the symmetric kernels on half the data).
+2. **End-to-end harness:** reduce → `dstedc` → back-transform m eigenvectors on the dumped GFN2 matrices, per-stage
+   times (the draft's breakdown); baselines: unsymmetrized and symmetric 1-stage + `dormtr`. Correctness: eigenvalues
+   against `dsyevd`, residual ‖H Z − Z Λ‖, orthogonality ‖Zᵀ Z − I‖.
+3. **2-stage:** dense → band (trailing block only) and band → tridiagonal, both back-transformations; sweep b = 8–64.
+4. **3-stage:** general band → band stage, configuration `[b1, b2]`; sweep (b1, b2).
+5. **Throughput:** jobs per second with 8 processes × 1 thread against the 1-stage reduction.
+6. **Later:** symmetry, band storage, NEON kernels for the small bulge blocks, pipelining.
+7. **Into xTB:** a C entry point for the whole eigensolve (the current `XTB_SYTRD_LIBRARIES` hook only replaces the
+   reduction), then both gate sets.
 
 ## Validation and pitfalls
 

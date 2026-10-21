@@ -1,6 +1,7 @@
 // Tridiagonal reduction of dumped GFN2 matrices: Accelerate's dsytrd_ / ssytrd_ against the C port
-// (xtb_dsytrd_upper / xtb_ssytrd_upper from xtb/src/mctc/lapack/sytrd.c, looked up in LIBXTB) and the Swift port in
-// this package (Sources/Diagonalization).
+// (xtb_dsytrd_upper / xtb_ssytrd_upper from xtb/src/mctc/lapack/sytrd.c, looked up in LIBXTB), the Swift port in
+// this package (Sources/Diagonalization), and the Swift port without exploiting symmetry (symmetric: false, the
+// baseline for successive band reduction).
 //
 //   swift build -c release --disable-sandbox
 //   VECLIB_MAXIMUM_THREADS=1 .build/release/sytrd-bench [--lib LIBXTB] [--reps N] HS.bin ...
@@ -139,15 +140,17 @@ func eigenvalues(_ n: Int, _ o: Output<Float>) -> [Double] {
 func report<T: BinaryFloatingPoint>(
   _ label: String, _ n: Int, _ t: [Double], _ o: [Output<T>], _ w: [[Double]], _ repeatable: [Bool]
 ) {
-  let names = ["Accelerate", "C (libxtb)", "Swift"]
+  let names = ["Accelerate", "C (libxtb)", "Swift", "Swift unsym."]
   var line = "\(label)"
-  for k in 0..<3 {
+  for k in 0..<4 {
     line += "  \(names[k]) \(String(format: "%7.3f", t[k])) ms"
   }
   line += String(format: "  | C %.2fx, Swift %.2fx vs Accelerate; Swift/C %.3f", t[0] / t[1], t[0] / t[2], t[2] / t[1])
   print(line)
   let same = identical(n, o[2], o[1])
-  let dw = (1..<3).map { k in zip(w[k], w[0]).map { abs($0 - $1) }.max()! }
+  let dw = (1..<4).map { k in zip(w[k], w[0]).map { abs($0 - $1) }.max()! }
+  print(String(format: "        unsymmetrized: %.2fx the time of Swift; eigenvalues vs Accelerate %.1e Eh", t[3] / t[2],
+    dw[2]))
   print("        Swift vs C: \(same ? "bit-identical" : String(format: "max |diff| %.1e", maxDifference(n, o[2], o[1])))"
     + String(format: "; eigenvalues vs Accelerate: C %.1e, Swift %.1e Eh", dw[0], dw[1])
     + "; same bits every round: " + zip(names, repeatable).map { "\($0) \($1 ? "yes" : "no")" }.joined(separator: ", "))
@@ -163,6 +166,7 @@ for path in files {
     { a, d, e, tau, work in dsytrd_("U", &nn, a, &lda, d, e, tau, work, &lwork, &info) },
     { a, d, e, tau, work in cSytrdD(&nn, a, &lda, d, e, tau, work) },
     { a, d, e, tau, work in xtb_dsytrd_upper(&nn, a, &lda, d, e, tau, work) },
+    { a, d, e, tau, work in tridiagonalize(n, a, n, d, e, tau, work, symmetric: false) },
   ])
   report("  FP64", n, tD, oD, oD.map { eigenvalues(n, $0) }, rD)
 
@@ -171,6 +175,7 @@ for path in files {
     { a, d, e, tau, work in ssytrd_("U", &nn, a, &lda, d, e, tau, work, &lwork, &info) },
     { a, d, e, tau, work in cSytrdS(&nn, a, &lda, d, e, tau, work) },
     { a, d, e, tau, work in xtb_ssytrd_upper(&nn, a, &lda, d, e, tau, work) },
+    { a, d, e, tau, work in tridiagonalize(n, a, n, d, e, tau, work, symmetric: false) },
   ])
   report("  FP32", n, tS, oS, oS.map { eigenvalues(n, $0) }, rS)
 }

@@ -4,6 +4,10 @@
 // product, the BLAS2 core of the reduction, is a vectorized kernel that reads the triangle once for four columns at
 // a time. Everything else calls Accelerate's legacy BLAS/LAPACK.
 //
+// symmetric = false is the same reduction without exploiting symmetry: the full matrix (both triangles) is read and
+// updated, with gemv, gemm and ger in place of symv, syr2k and syr2, at twice the work. It is the baseline for the
+// successive band reduction work, which doesn't exploit symmetry either. Same Householder vectors up to rounding.
+//
 // Matrices are column-major. Indices in the LAPACK routines are 1-based, as in the Fortran and the C port.
 // Arithmetic follows the C source as written: the vector multiply-adds are fused (vfmaq), every scalar a * b + c is
 // rounded twice. Swift never contracts, so this port gives the same bits as sytrd.c compiled with
@@ -30,6 +34,15 @@ public protocol TridiagonalScalar: BinaryFloatingPoint, SIMDScalar {
   static func syr2(
     _ n: Int, _ alpha: Self, _ x: UnsafePointer<Self>, _ y: UnsafePointer<Self>, _ a: UnsafeMutablePointer<Self>,
     _ lda: Int)
+  /// C = alpha op(A) op(B) + beta C
+  static func gemm(
+    _ transa: UnsafePointer<CChar>, _ transb: UnsafePointer<CChar>, _ m: Int, _ n: Int, _ k: Int, _ alpha: Self,
+    _ a: UnsafePointer<Self>, _ lda: Int, _ b: UnsafePointer<Self>, _ ldb: Int, _ beta: Self,
+    _ c: UnsafeMutablePointer<Self>, _ ldc: Int)
+  /// A = alpha x y^T + A, m x n
+  static func ger(
+    _ m: Int, _ n: Int, _ alpha: Self, _ x: UnsafePointer<Self>, _ y: UnsafePointer<Self>,
+    _ a: UnsafeMutablePointer<Self>, _ lda: Int)
   static func larfg(
     _ n: Int, _ alpha: UnsafeMutablePointer<Self>, _ x: UnsafeMutablePointer<Self>,
     _ tau: UnsafeMutablePointer<Self>)
@@ -69,6 +82,24 @@ extension Double: TridiagonalScalar {
   ) {
     var n = lint(n), lda = lint(lda), incx: lint = 1, incy: lint = 1, alpha = alpha
     dsyr2_("U", &n, &alpha, x, &incx, y, &incy, a, &lda)
+  }
+  @inline(__always)
+  public static func gemm(
+    _ transa: UnsafePointer<CChar>, _ transb: UnsafePointer<CChar>, _ m: Int, _ n: Int, _ k: Int, _ alpha: Double,
+    _ a: UnsafePointer<Double>, _ lda: Int, _ b: UnsafePointer<Double>, _ ldb: Int, _ beta: Double,
+    _ c: UnsafeMutablePointer<Double>, _ ldc: Int
+  ) {
+    var m = lint(m), n = lint(n), k = lint(k), lda = lint(lda), ldb = lint(ldb), ldc = lint(ldc)
+    var alpha = alpha, beta = beta
+    dgemm_(transa, transb, &m, &n, &k, &alpha, a, &lda, b, &ldb, &beta, c, &ldc)
+  }
+  @inline(__always)
+  public static func ger(
+    _ m: Int, _ n: Int, _ alpha: Double, _ x: UnsafePointer<Double>, _ y: UnsafePointer<Double>,
+    _ a: UnsafeMutablePointer<Double>, _ lda: Int
+  ) {
+    var m = lint(m), n = lint(n), lda = lint(lda), incx: lint = 1, incy: lint = 1, alpha = alpha
+    dger_(&m, &n, &alpha, x, &incx, y, &incy, a, &lda)
   }
   @inline(__always)
   public static func larfg(
@@ -127,6 +158,24 @@ extension Float: TridiagonalScalar {
   ) {
     var n = lint(n), lda = lint(lda), incx: lint = 1, incy: lint = 1, alpha = alpha
     ssyr2_("U", &n, &alpha, x, &incx, y, &incy, a, &lda)
+  }
+  @inline(__always)
+  public static func gemm(
+    _ transa: UnsafePointer<CChar>, _ transb: UnsafePointer<CChar>, _ m: Int, _ n: Int, _ k: Int, _ alpha: Float,
+    _ a: UnsafePointer<Float>, _ lda: Int, _ b: UnsafePointer<Float>, _ ldb: Int, _ beta: Float,
+    _ c: UnsafeMutablePointer<Float>, _ ldc: Int
+  ) {
+    var m = lint(m), n = lint(n), k = lint(k), lda = lint(lda), ldb = lint(ldb), ldc = lint(ldc)
+    var alpha = alpha, beta = beta
+    sgemm_(transa, transb, &m, &n, &k, &alpha, a, &lda, b, &ldb, &beta, c, &ldc)
+  }
+  @inline(__always)
+  public static func ger(
+    _ m: Int, _ n: Int, _ alpha: Float, _ x: UnsafePointer<Float>, _ y: UnsafePointer<Float>,
+    _ a: UnsafeMutablePointer<Float>, _ lda: Int
+  ) {
+    var m = lint(m), n = lint(n), lda = lint(lda), incx: lint = 1, incy: lint = 1, alpha = alpha
+    sger_(&m, &n, &alpha, x, &incx, y, &incy, a, &lda)
   }
   @inline(__always)
   public static func larfg(
@@ -245,7 +294,7 @@ private func at(_ i: Int, _ j: Int, _ ld: Int) -> Int { (i - 1) + (j - 1) * ld }
 @inline(__always)
 func latrdUpper<T: TridiagonalScalar>(
   _ n: Int, _ nb: Int, _ a: UnsafeMutablePointer<T>, _ lda: Int, _ e: UnsafeMutablePointer<T>,
-  _ tau: UnsafeMutablePointer<T>, _ w: UnsafeMutablePointer<T>, _ ldw: Int
+  _ tau: UnsafeMutablePointer<T>, _ w: UnsafeMutablePointer<T>, _ ldw: Int, _ symmetric: Bool
 ) {
   for i in stride(from: n, through: n - nb + 1, by: -1) {
     let iw = i - n + nb
@@ -259,7 +308,11 @@ func latrdUpper<T: TridiagonalScalar>(
       T.larfg(im1, a + at(i - 1, i, lda), a + at(1, i, lda), tau + (i - 2))
       e[i - 2] = a[at(i - 1, i, lda)]
       a[at(i - 1, i, lda)] = 1
-      symmetricMatrixVector(im1, 1, a, lda, a + at(1, i, lda), w + at(1, iw, ldw))
+      if symmetric {
+        symmetricMatrixVector(im1, 1, a, lda, a + at(1, i, lda), w + at(1, iw, ldw))
+      } else {
+        T.gemv("N", im1, im1, 1, a, lda, a + at(1, i, lda), 1, 0, w + at(1, iw, ldw))
+      }
       if i < n {
         let m = n - i
         T.gemv("T", im1, m, 1, w + at(1, iw + 1, ldw), ldw, a + at(1, i, lda), 1, 0, w + at(i + 1, iw, ldw))
@@ -278,7 +331,7 @@ func latrdUpper<T: TridiagonalScalar>(
 @inline(__always)
 func sytd2Upper<T: TridiagonalScalar>(
   _ n: Int, _ a: UnsafeMutablePointer<T>, _ lda: Int, _ d: UnsafeMutablePointer<T>, _ e: UnsafeMutablePointer<T>,
-  _ tau: UnsafeMutablePointer<T>
+  _ tau: UnsafeMutablePointer<T>, _ symmetric: Bool
 ) {
   for i in stride(from: n - 1, through: 1, by: -1) {
     var taui: T = 0
@@ -286,10 +339,19 @@ func sytd2Upper<T: TridiagonalScalar>(
     e[i - 1] = a[at(i, i + 1, lda)]
     if taui != 0 {
       a[at(i, i + 1, lda)] = 1
-      symmetricMatrixVector(i, taui, a, lda, a + at(1, i + 1, lda), tau)
+      if symmetric {
+        symmetricMatrixVector(i, taui, a, lda, a + at(1, i + 1, lda), tau)
+      } else {
+        T.gemv("N", i, i, taui, a, lda, a + at(1, i + 1, lda), 1, 0, tau)
+      }
       let alpha = -0.5 * taui * T.dot(i, tau, a + at(1, i + 1, lda))
       T.axpy(i, alpha, a + at(1, i + 1, lda), tau)
-      T.syr2(i, -1, a + at(1, i + 1, lda), tau, a, lda)
+      if symmetric {
+        T.syr2(i, -1, a + at(1, i + 1, lda), tau, a, lda)
+      } else {
+        T.ger(i, i, -1, a + at(1, i + 1, lda), tau, a, lda)
+        T.ger(i, i, -1, tau, a + at(1, i + 1, lda), a, lda)
+      }
       a[at(i, i + 1, lda)] = e[i - 1]
     }
     d[i] = a[at(i + 1, i + 1, lda)]
@@ -299,23 +361,29 @@ func sytd2Upper<T: TridiagonalScalar>(
 }
 
 /// LAPACK dsytrd, UPLO = 'U', with ilaenv's defaults: block size 32, crossover 32. work holds at least n * 32.
+/// symmetric = false: A holds the full symmetric matrix and both triangles are updated (see the top of the file).
 @inline(__always)
 public func tridiagonalize<T: TridiagonalScalar>(
   _ n: Int, _ a: UnsafeMutablePointer<T>, _ lda: Int, _ d: UnsafeMutablePointer<T>, _ e: UnsafeMutablePointer<T>,
-  _ tau: UnsafeMutablePointer<T>, _ work: UnsafeMutablePointer<T>
+  _ tau: UnsafeMutablePointer<T>, _ work: UnsafeMutablePointer<T>, symmetric: Bool = true
 ) {
   let nb = 32, nx = 32
   var kk = n
   if n > nx {
     kk = n - ((n - nx + nb - 1) / nb) * nb
     for i in stride(from: n - nb + 1, through: kk + 1, by: -nb) {
-      latrdUpper(i + nb - 1, nb, a, lda, e, tau, work, n)
-      T.syr2k(i - 1, nb, -1, a + at(1, i, lda), lda, work, n, a, lda)
+      latrdUpper(i + nb - 1, nb, a, lda, e, tau, work, n, symmetric)
+      if symmetric {
+        T.syr2k(i - 1, nb, -1, a + at(1, i, lda), lda, work, n, a, lda)
+      } else {
+        T.gemm("N", "T", i - 1, i - 1, nb, -1, a + at(1, i, lda), lda, work, n, 1, a, lda)
+        T.gemm("N", "T", i - 1, i - 1, nb, -1, work, n, a + at(1, i, lda), lda, 1, a, lda)
+      }
       for j in i...(i + nb - 1) {
         a[at(j - 1, j, lda)] = e[j - 2]
         d[j - 1] = a[at(j, j, lda)]
       }
     }
   }
-  sytd2Upper(kk, a, lda, d, e, tau)
+  sytd2Upper(kk, a, lda, d, e, tau, symmetric)
 }
