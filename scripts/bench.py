@@ -8,8 +8,9 @@ Set the thread variables yourself (OMP_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1) a
 If LIB was built with the SCC timers (xtb/src/scc_timer.f90), the per-stage breakdown of every timed run is recorded:
 seconds per single point in each stage, the overlap factorization, the SCC loop total and everything outside the loop
 (integrals, gradient). The timers write one line per cycle, so time wall clock with a build without them.
+Also records each case process's peak resident memory (ru_maxrss, includes Python and numpy).
 """
-import ctypes as C, json, os, subprocess, sys, tempfile, time
+import ctypes as C, json, os, resource, subprocess, sys, tempfile, time
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -58,7 +59,8 @@ def one(lib, sid, uhf, reps, etemp):
             if tfile:
                 s = parse_timers(open(tfile).read()); s['outside'] = dt - s['scc_loop']; stages.append(s)
     out = dict(id=sid, uhf=uhf, n_atoms=n, etemp_K=etemp, walls_s=walls, median_s=float(np.median(walls)),
-               min_s=min(walls), max_s=max(walls), energy_Eh=e.value, clean=not L.xtb_checkEnvironment(env))
+               min_s=min(walls), max_s=max(walls), energy_Eh=e.value, clean=not L.xtb_checkEnvironment(env),
+               peak_rss_MB=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2**20)
     if stages:
         out['stages_s'] = {k: float(np.median([s[k] for s in stages])) for k in stages[0]}
     print(json.dumps(out), flush=True)
@@ -84,7 +86,7 @@ def main():
             os.unlink(tmp)
         r = json.loads(p.stdout.strip().splitlines()[-1]); res.append(r)
         s = r.get('stages_s')
-        print(f"{sid:20s} u{uhf} median {r['median_s']:.3f} s (min {r['min_s']:.3f}, max {r['max_s']:.3f})"
+        print(f"{sid:20s} u{uhf} median {r['median_s']:.3f} s (min {r['min_s']:.3f}, max {r['max_s']:.3f})  peak {r['peak_rss_MB']:.0f} MB"
               + (f"  cycles {s['cycles']:.0f}  eigensolve {s['eigensolve'] / r['median_s']:.0%}" if s else ''), flush=True)
     meta = dict(library=lib, reps=reps, etemp_K=etemp, threads=dict((k, os.environ.get(k)) for k in
                 ('OMP_NUM_THREADS', 'VECLIB_MAXIMUM_THREADS')), timers='XTB_SCC_TIMERS' in os.environ,
