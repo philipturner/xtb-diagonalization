@@ -297,7 +297,10 @@ Steps:
 3. **2-stage:** dense → band and band → tridiagonal, both back-transformations; sweep b = 8–64. First version done
    (2026-10-21, `Sources/Diagonalization/TwoStage.swift`, `eigen-bench`): accurate at every b, 1.9–2.1× the time of
    the unsymmetrized 1-stage eigensolve at the best b (24–32), see `LOG.md`.
-4. **3-stage:** general band → band stage, configuration `[b1, b2]`; sweep (b1, b2).
+4. **3-stage:** general band → band stage, configuration `[b1, b2]`; sweep (b1, b2). First version done (2026-10-21,
+   `Sources/Diagonalization/SuccessiveBandReduction.swift`): one routine for every stage b_in → b_out (dense → band is
+   b_in = n − 1, the bulge chase b_out = 1), any list of bandwidths; accurate on random matrices n = 3–131 and the four
+   GFN2 matrices; not yet fast (see `LOG.md`).
 5. **Throughput:** jobs per second with 8 processes × 1 thread against the 1-stage reduction.
 6. **Block sizes first, then the deferred optimizations** (user, 2026-10-21). Get code that works, then:
    - **Find the relevant block-size range:** sweep b (2-stage) and (b1, b2) (3-stage) on the unoptimized code and keep

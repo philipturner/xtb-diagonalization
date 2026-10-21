@@ -8,6 +8,11 @@
 //   VECLIB_MAXIMUM_THREADS=1 .build/release/eigen-bench [--b 8,16,32] [--vectors 1.0] [--reps 5] HS.bin ...
 //
 // --unblocked-bulges: stage 2's back-transformation one reflector at a time (the reference) instead of blocked.
+// --sbr 64-16,32: successive band reduction variants (SuccessiveBandReduction.swift), here 3-stage n-1 -> 64 -> 16 -> 1
+// and 2-stage n-1 -> 32 -> 1; each stage and back-transformation timed. --whole: SBR updates span the whole matrix
+// instead of a window (cross-check). The check line adds each SBR stage's largest entry outside its target band.
+// --fast-tail: the SBR variants' last stage (b -> 1) by TwoStage.swift's bulge chase and blocked back-transformation.
+// "random:N" in place of HS.bin: a random symmetric N x N matrix.
 // HS.bin: dump from the xtb branch diag/dump (int32 n, H(n,n), S(n,n), ...); the eigenproblem is H' = X^T H X
 // (S = U^T U, X = U^-1). --vectors: the fraction of eigenvectors (lowest first) to back-transform. Variants run
 // round-robin, one call each per round after one untimed round; medians per stage. Checks against dsyevd
@@ -36,6 +41,9 @@ var bandwidths = [8, 16, 32]
 var fraction = 1.0
 var reps = 5
 var blockedBulges = true
+var sbrConfigs: [[Int]] = []
+var windowed = true
+var fastTail = false
 var files: [String] = []
 var argi = 1
 let args = CommandLine.arguments
@@ -45,12 +53,24 @@ while argi < args.count {
   case "--vectors": fraction = Double(args[argi + 1])!; argi += 2
   case "--reps": reps = Int(args[argi + 1])!; argi += 2
   case "--unblocked-bulges": blockedBulges = false; argi += 1
+  case "--sbr":
+    sbrConfigs = args[argi + 1].split(separator: ",").map { $0.split(separator: "-").map { Int($0)! } }; argi += 2
+  case "--whole": windowed = false; argi += 1
+  case "--fast-tail": fastTail = true; argi += 1
   default: files.append(args[argi]); argi += 1
   }
 }
 
-/// H' = X^T H X from a dump, column-major n x n.
+/// H' = X^T H X from a dump, column-major n x n; "random:N" makes a random symmetric N x N matrix instead (entries
+/// uniform in [-1, 1], fixed seed), for edge cases of small and odd sizes.
 func readMatrix(_ path: String) -> (Int, UnsafeMutablePointer<Double>) {
+  if path.hasPrefix("random:") {
+    let n = Int(path.dropFirst(7))!
+    let H = buffer(n * n)
+    srand48(n)
+    for j in 0..<n { for i in 0...j { let x = 2 * drand48() - 1; H[i + j * n] = x; H[j + i * n] = x } }
+    return (n, H)
+  }
   guard let f = fopen(path, "rb") else { fatalError("cannot open \(path)") }
   defer { fclose(f) }
   var n32: Int32 = 0
@@ -128,7 +148,7 @@ for path in files {
         timed(&t) { ormtr() }
       }))
   }
-  for b in bandwidths {
+  for b in bandwidths where b < n - 1 {
     variants.append(Variant(
       name: "2-stage b=\(b)", stages: ["band", "bulge", "dstedc", "bt-bulge", "bt-band"],
       run: { t in
@@ -142,6 +162,42 @@ for path in files {
         }
         timed(&t) { backTransformBand(n, b, v1, t1, Z, n, m, work) }
       }))
+  }
+
+  var leftovers = Array(repeating: "", count: variants.count + sbrConfigs.count)
+  for (ci, config) in sbrConfigs.enumerated() {
+    // Bandwidths that don't fit this n are dropped (as successiveBandReduction does).
+    var chain = [n - 1]
+    for b in config + [1] where b < chain.last! && (b == 1 || b < n - 1) { chain.append(b) }
+    guard chain.count >= 2, n >= 2 else { continue }
+    let names = (1..<chain.count).map { "\(chain[$0 - 1] == n - 1 ? "n" : String(chain[$0 - 1]))>\(chain[$0])" }
+    let vi = variants.count
+    variants.append(Variant(
+      name: "SBR " + chain.dropFirst().dropLast().map(String.init).joined(separator: "-"),
+      stages: names + ["dstedc"] + names.reversed().map { "bt" + $0 },
+      run: { t in
+        A.update(from: H, count: n * n)
+        var stages: [BandReductionStage<Double>] = []
+        let tail = fastTail && chain.count >= 3 ? chain[chain.count - 2] : 0
+        for s in 1..<chain.count {
+          timed(&t) {
+            if tail > 0 && s == chain.count - 1 {
+              chaseBulges(n, tail, A, n, v2, w, e, work)
+            } else {
+              stages.append(reduceBandwidth(n, A, n, bandIn: chain[s - 1], bandOut: chain[s], panel: chain[s],
+                                            windowed: windowed))
+            }
+          }
+        }
+        for i in 0..<n { w[i] = A[i + i * n] }
+        for i in 0..<(n - 1) { e[i] = A[(i + 1) + i * n] }
+        timed(&t) { stedc() }
+        if tail > 0 { timed(&t) { backTransformBulgesBlocked(n, tail, v2, Z, n, m, work) } }
+        for stage in stages.reversed() { timed(&t) { backTransform(stage, Z, n, m) } }
+        leftovers[vi] = "; outside band per stage " + stages.map { String(format: "%.0e", $0.leftover) }
+          .joined(separator: " ")
+      }))
+    _ = ci
   }
 
   var times = Array(repeating: [[Double]](), count: variants.count)
@@ -177,7 +233,7 @@ for path in files {
     line += String(format: " total %8.2f ms (%.2fx unsym) |", 1e3 * total, total / base)
     for (s, name) in v.stages.enumerated() { line += " \(name) " + String(format: "%.2f", 1e3 * per[s]) }
     print(line)
-    print("                 \(checks[k])")
+    print("                 \(checks[k])\(k < leftovers.count ? leftovers[k] : "")")
   }
   for p in [A, Z, w, e, tau, work, v1, t1, v2, wRef, H] { p.deallocate() }
   iwork.deallocate()

@@ -183,3 +183,17 @@
   half-empty 2b × b blocks, at ~75 vs ~125 GFLOPS), band back-transformation 6.2. The blocked bulge back-transformation
   cut 18.3 → 5.0 ms at n = 412, b = 32 (unblocked reference kept, `--unblocked-bulges`); the column-order bulge update
   11.5 → 7.1 ms. Rough relevant range so far: b = 16–48. Not yet checked: 8 × 1 throughput.
+- **3-stage SBR, correctness first** (`Sources/Diagonalization/SuccessiveBandReduction.swift`): `reduceBandwidth`
+  reduces any band b_in → b_out (panel p ≤ b_out): per step a QR of a (p + b_in − b_out) × p block (`geqrf`,
+  `larft`) applied to both sides (`larfb`) on a window around it, chasing the bulge's first p columns down by b_in per
+  step (Bischof–Lang–Sun); dense → band is b_in = n − 1, the classical chase b_out = p = 1. `successiveBandReduction`
+  runs any chain n − 1 → b1 → … → 1; `backTransform` replays each stage's WY blocks in reverse. `eigen-bench --sbr
+  64-16,32 [--whole] [--fast-tail]`, `random:N` matrices. Checks: 74 variant runs on random matrices n = 3–131 (chains
+  up to 4 stages, bandwidths up to n − 2): eigenvalues ≤ 5.3e-14, residual ≤ 1.1e-15, orthogonality ≤ 4.8e-15; four
+  GFN2 matrices, chains [32], [64,16], [96,32], [128,32], [64,8], [128,16], 4-stage [96,32,8], [64,8,2]: eigenvalues
+  ≤ 3.0e-13 Eh; every stage leaves exactly zero outside its band (no out-of-band entry escapes the explicit
+  annihilations); windowed and whole-matrix updates agree. Time (`build/sbr-fasttail.txt`, last stage by TwoStage's
+  chase + blocked back-transformation, n = 776, all vectors, ms): 2-stage [32] 86.4 (TwoStage 83.6); 3-stage [128,32]
+  111.8: middle stage 22.2 + its back-transformation 9.7 cost more than they save; [64,16] 143.5: the tail chase drops
+  24.4 → 13.1 but its blocked back-transformation rises 25.0 → 56.7 (small blocks). Unoptimized; all-general (no fast
+  tail) is 6–10× the 1-stage time, dominated by the per-bulge b → 1 steps.
