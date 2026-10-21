@@ -5,18 +5,19 @@ All times: M1 Max, Accelerate, 1 thread, median of 5 cold single points, 300 K, 
 
 ## Headline
 
-`diagonalization` (fork commit `e891e78`) is **1.51–1.89x faster** than the production library per single point and
-passes every gate on all 174 runs. With opt-in FP32 early cycles (`XTB_SCC_FP32_RMSQ=1e-3`) it is **1.66–2.08x**,
-but fails the gates on five 100 K runs. Timing: three round-robin rounds of median-of-5, spread ≤ 3.1%.
+`diagonalization` (fork commit `aa5ecd7`; default path identical to `e891e78`) is **1.51–1.89x faster** than the
+production library per single point and passes every gate on all 174 runs. With opt-in FP32 early cycles
+(`XTB_SCC_FP32_RMSQ=1e-3`) it is **1.89–2.19x** (n = 448: 1.90x), but fails the gates (see Phase 3). Timing: three
+round-robin rounds of median-of-5, spread ≤ 3.1% (the FP32 column with the vectorized FP32 reduction: one set of 5).
 
 | Case (n) | production library | `diagonalization` | + FP32 early cycles (opt-in) |
 | --- | --- | --- | --- |
-| `t2_R` (124) | 0.045 s | 0.028 s (1.64x) | 0.025 s (1.82x) |
-| `facet_closed` (412) | 0.581 s | 0.349 s (1.66x) | 0.327 s (1.77x) |
-| `s12_C31` (419) | 1.553 s | 1.032 s (1.51x) | 0.931 s (1.67x) |
-| `facet_dbpair_tool` (448) | 1.101 s | 0.731 s (1.51x) | 0.665 s (1.66x) |
-| `s3_S42_159` (619) | 2.224 s | 1.400 s (1.59x) | 1.293 s (1.72x) |
-| `diamond233` (776) | 2.343 s | 1.241 s (1.89x) | 1.128 s (2.08x) |
+| `t2_R` (124) | 0.045 s | 0.028 s (1.64x) | 0.024 s (1.89x) |
+| `facet_closed` (412) | 0.581 s | 0.349 s (1.66x) | 0.294 s (1.97x) |
+| `s12_C31` (419) | 1.553 s | 1.032 s (1.51x) | 0.820 s (1.89x) |
+| `facet_dbpair_tool` (448) | 1.101 s | 0.731 s (1.51x) | 0.581 s (1.90x) |
+| `s3_S42_159` (619) | 2.224 s | 1.400 s (1.59x) | 1.160 s (1.92x) |
+| `diamond233` (776) | 2.343 s | 1.241 s (1.89x) | 1.069 s (2.19x) |
 
 Where it comes from (each step passes both gate sets): #1465 integrals, #1466 SCC linear algebra, #1464 dispersion
 gradient (upstream PRs by g8j39, merged), multipole moments summed per atom pair (`6c4b68f`, −3.5–5.5%), and a
@@ -85,16 +86,19 @@ production library at the same accuracy), and production accuracy only checks sa
   last correction is < 1e-5, else exact solve and back-off. **Passes every gate with SCC cycle counts unchanged**, but
   the gain is small: 1–4% faster at n ≤ 448, 3–7% slower at n ≥ 619 (storing all eigenvectors and failed attempts
   cost more than the refined cycles save). Not merged.
-- **Option C, FP32 early cycles:** implemented (opt-in). FP32 eigensolve is 30% cheaper; density error 1e-6–1e-4, no
-  failures; single points 14–17% faster. Passes every gate at 300 K and 1000 K; at 100 K four slow `s12_C31` radicals
-  need 15–16% more cycles (gate 10%) and `s12_C00` uhf 3 stops converging at accuracy 0.01. Even one FP32 cycle
-  changes those trajectories; a later switch doesn't help. **Your call** whether 300 K-only use is acceptable.
+- **Option C, FP32 early cycles:** implemented (opt-in). FP32 eigensolve is 30% cheaper (more with the vectorized FP32
+  reduction); density error 1e-6–1e-4; single points 14–25% faster. **Not safe as is.** With Accelerate's `ssytrd` it
+  passed every gate at 300 K and 1000 K but failed five 100 K runs (cycle count, one convergence at accuracy 0.01);
+  with the equally accurate vectorized FP32 reduction, `facet_bare_dimer` uhf 0 at **300 K** stops converging instead.
+  Even one FP32 cycle changes those trajectories; a later switch doesn't help. Which fragile run breaks depends on
+  rounding details, so FP32 needs a safeguard (for example: fall back to FP64 when the SCC stalls) before production use.
 - **Cycle count (side experiment, `diag/broyden`):** Broyden damping 0.2–0.3 instead of xTB's 0.40 cuts SCC cycles on
   the slow open-shell systems by 19–51% and over the grid by 13.6%, but moves `facet_bare_dimer` uhf 0 at 100 K to a
   different SCF solution 3.0 mEh higher (gap 1.54 instead of 0.20 eV) and doubles another run's cycles. Not usable as
   a global default; cycle count is the biggest remaining lever if a safer accelerator can be found.
 - **Fragile runs:** `facet_bare_dimer` uhf 0 (300 K) and `s12_C00` uhf 3 (100 K) fail to converge from some perturbed
-  starts; the 100 K `s12_C31` radicals change their cycle count by up to 16% under any 1e-6 perturbation.
+  starts; the 100 K `s12_C31` radicals change their cycle count by up to 16% under any 1e-6 perturbation. The same
+  fragility exists in production: any change of rounding (BLAS version, thread count) could flip such a run.
 
 ## Phase 4
 
