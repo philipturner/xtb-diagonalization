@@ -389,3 +389,12 @@
   didn't shrink that footprint, hence no gain. Chase timings depend on what ran just before them. Next lever: keep
   the chase's working set in L1 by passing several consecutive sweeps through the same window (bulge window ~110 KB
   at b = 48 FP64, ~50 KB at b = 32 or FP32; L1 128 KB), confined to `BulgeChasing.swift` behind an option.
+- **Hardware counters of the slow state** (Instruments CPU Counters through `xctrace`, user's template
+  `build/memory-counters.tracetemplate`: time-sampled every 100 µs; `scripts/kernels/chase_trace.c` marks each run of
+  the chase's memory pattern with a signpost, `scripts/chase_counters.py` sums counters per run; n = 1204, b = 48;
+  record with `--all-processes` and launch the program separately: `--launch` recorded no samples of it). Per run,
+  fast (107 runs, 19.6 ms) vs slow (6 runs, 31.6 ms): INST_ALL 2.15e8 vs 2.14e8 (same work); L1D_CACHE_MISS_LD 3.46e7
+  vs 3.93e7; L1D_CACHE_MISS_ST 2.36e7 vs 0.60e7; L1D_CACHE_WRITEBACK 1.31e7 vs 1.30e7; MAP_STALL 2.36e7 vs 5.28e7
+  (+29 M cycles, ~9 ms of the 12); L1D_TLB_MISS 3.67e6 vs 2.46e6; L2_TLB_MISS_DATA 1.4e3 both. So the slow state
+  costs more per L1 miss (slower L2/fabric response or different prefetching), not more misses; no M1 counter here
+  separates L2 from the system-level cache. Supports keeping the chase's working set in L1.
