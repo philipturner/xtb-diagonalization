@@ -375,3 +375,17 @@
   validated in Swift; after every singlepoint `xtb_getSCCPrecision` is checked against the calculator (mismatch
   traps) and exposed as `calculator.precisionReport`. Tests: 16/16 with the diagonalization library (1 and 8
   threads); production library 13 pass, 3 FP32 tests skip, `.fp32` traps (checked from a scratch package).
+- **Why the chase is slower after `l` (diagnosis; corrects "the chase isn't memory-bound").** Probe (temporary
+  eigen-bench code, `build/chase-probe.txt`; chase on a fresh copy of the `tcs` band, n = 1204 b = 48 / 1788 b = 64,
+  median of 9): after nothing 39.1 / 108.0 ms, `dgemm` 39.5 / 108.2, stage 1 `tcs` 39.2 / 108.1, 20 ms spin 39.6 /
+  108.3; after one `dsyr2k` 49.1 / 127.8, `dsymm` 48.8 / 118.7, stage 1 `tcls` 49.4 / 122.1; 50 ms sleep 43.4 /
+  110.9. `scripts/kernels/accel_after.c`: no extra threads and 0.0 ms CPU after the kernels; an AMX `clr` after
+  `dsyr2k` raises SIGILL (the kernel already disabled AMX); a pure-L1 compute loop is unaffected (3.46–3.52 ms). The
+  chase's memory pattern alone (no real arithmetic, n = 1204) runs at either ~19 or ~32 ms, bimodal: slow after
+  `dsymm`, `dsyr2k`, or a plain 64 MB read (no Accelerate), for one to several consecutive runs (~30–150 ms), then
+  fast again. So it's a hardware power/cache state after heavy memory streaming that slows L2-bound code up to 1.7x,
+  not Accelerate or our code (mechanism unconfirmed without counters). About half of the chase (~19 of ~39 ms at
+  n = 1204) is L2 traffic: each of its ~n sweeps streams the whole band window (~1.4 MB) through L2. Band storage
+  didn't shrink that footprint, hence no gain. Chase timings depend on what ran just before them. Next lever: keep
+  the chase's working set in L1 by passing several consecutive sweeps through the same window (bulge window ~110 KB
+  at b = 48 FP64, ~50 KB at b = 32 or FP32; L1 128 KB), confined to `BulgeChasing.swift` behind an option.
