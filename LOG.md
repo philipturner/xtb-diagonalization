@@ -92,3 +92,8 @@
   GFN-FF bit-identical to production and writes no files (`diagonalization` alone writes `gfnff_topo`); GFN2 identical
   to `diagonalization` (174/174). FP32 `ssyevd_2stage` (new interface only) is accurate (rel. 1.5–3.6e-6), refuses
   eigenvectors; new-interface `dstedc` 5% slower than legacy.
+- **2 threads** (production's setting): `diag/production` passes the phase2 gates on all 174 runs, cycles unchanged
+  (`make_reference.py --threads 2`).
+- **Stopped here.** Remaining safe per-single-point gains are each ≤ 5% (H build, potential, work outside the loop);
+  `dstedc`'s scalar root finder can't be sped up from outside Accelerate. Next steps are the user's decisions in
+  `FINDINGS.md`: FP32 safeguard, SCC accelerator, handover of `diag/production` (needs a Swift check), pushes.

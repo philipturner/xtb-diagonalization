@@ -15,6 +15,7 @@ library path + sha256. Plus reference/SUMMARY.tsv.
   python3 scripts/make_reference.py [--lib PATH] [--out DIR] [--accuracy 1.0] [--workers 4] [--only ID] [--one ID UHF ETEMP]
 
 --accuracy changes xtb_setAccuracy for validation runs only (e.g. 0.01 for the tight-accuracy gate); production is 1.0.
+--threads sets OMP_NUM_THREADS and VECLIB_MAXIMUM_THREADS per worker (default 1; production Python uses 2).
 """
 import ctypes as C, hashlib, json, os, re, subprocess, sys, tempfile, time
 import numpy as np
@@ -130,10 +131,11 @@ def main():
     if a[:1] == ['--one']:
         return one(a[1], int(a[2]), float(a[3]))
     W = int(a[a.index('--workers') + 1]) if '--workers' in a else 4
+    T = a[a.index('--threads') + 1] if '--threads' in a else '1'
     todo = [c for c in cases() if '--only' not in a or c[0] == a[a.index('--only') + 1]]
     todo = [c for c in todo if not os.path.exists(f"{REF}/{c[0]}_u{c[1]}_T{c[2]:g}.json")]
     todo.sort(key=lambda c: -os.path.getsize(f"{ST}/{c[0]}.xyz"))  # largest first
-    env = dict(os.environ, OMP_NUM_THREADS='1', VECLIB_MAXIMUM_THREADS='1')
+    env = dict(os.environ, OMP_NUM_THREADS=T, VECLIB_MAXIMUM_THREADS=T, OMP_STACKSIZE='2G')
     run = []
     while todo or run:
         while todo and len(run) < W:

@@ -14,4 +14,8 @@ git clone --recurse-submodules https://github.com/philipturner/xtb-diagonalizati
 - `reference/`: GFN2 results from the production library (xtb 6.7.1 + Accelerate) for every structure × two spin
   states × electronic temperature 100 / 300 / 1000 K: energy, gradient, charges, orbital eigenvalues and occupations,
   HOMO–LUMO gap and SCC iteration count. `reference/SUMMARY.tsv` has one line per run.
-- `scripts/make_reference.py`: drives any `libxtb.dylib` through the xTB C API with the production call sequence.
+- `scripts/make_reference.py`: drives any `libxtb.dylib` through the xTB C API with the production call sequence
+  (`--accuracy`, `--threads` for validation runs).
+- `scripts/compare.py`: checks a run against the accuracy gates; `bench.py`, `sweep.py`, `warmstart.py`, `noise.py`:
+  timing, throughput, warm starts, SCC noise floor; `scripts/kernels/`: eigensolver kernel studies.
+- `FINDINGS.md`: answers to the brief's questions; `baseline.md`: Phase 1 measurements; `LOG.md`: session log.
