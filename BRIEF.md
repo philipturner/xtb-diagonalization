@@ -55,7 +55,7 @@ Hypotheses this work should confirm or kill:
 
 The production matrices are smaller than the n = 776 profile: n ≈ 120–660, mostly 410–450. These counts come from GFN2's basis, verified in `src/xtb/gfn2.f90` (`nShell`, `angShell`): H 1 function (1s only), C and O 4, Si/Ge/Sn 9 (s, p, d).
 
-The test set is ready in `structures/` (30 `.xyz` files, `MANIFEST.tsv` with atoms, n, uhf, source and what each case exercises; provenance in `scripts/provenance/make_testset.py`). All are neutral. Groups:
+The test set is ready in `structures/` (33 `.xyz` files, `MANIFEST.tsv` with atoms, n, uhf, source and what each case exercises; provenance in `scripts/provenance/make_testset.py`). All are neutral. Groups:
 
 | Group | Files | Atoms | n | Notes |
 | --- | --- | --- | --- | --- |
@@ -66,6 +66,7 @@ The test set is ready in `structures/` (30 `.xyz` files, `MANIFEST.tsv` with ato
 | 40-Si facet + C₂ radical tool | `facet_dbpair_tool`, `facet_capped_tool`, `facet_capsi_product`, `facet_h_abstracted` | 105–107 | 448–450 | Stage 3 production; bare DB pair + tool (3 unpaired, production uhf 1) is the hardest SCF |
 | Stage 3 explicit GFN2 regions | `s3_S40_156`, `s3_S42_159`, `s3_S49_163` | 156–163 | 592–655 | tool + facet; S42 just before a bond rupture |
 | Off-equilibrium copies | `<id>_rms05`, `<id>_rms15` of six of the above | | | seeded Gaussian displacements, 0.05 Å rms (thermal size) and 0.15 Å rms (max forces 3–19 eV/Å) |
+| Large-n SiC (hexagonal, closed shell) | `sic_n588`, `sic_n1204`, `sic_n1788` | 148–402 | 588–1788 | HDL `Lattice<Hexagonal>` + `Reconstruction`, H-passivated, MM4 minimum + 0.05 Å rms displacement (built by `gpu-render --sic-clusters build h:AxBxC` in the mechanosynthesis repo, `Studies/SiCClusterStudy.swift`); wide gap (3–4 eV), max force 3.5–4.5 eV/Å. Reference at uhf 0, 300 K only. Cold SCF, one thread: 27 / 58 / 89 SCC iterations, 1.4 / 14.9 / ~73 s (50 / 258 / 839 ms per iteration). Only for algorithms that pay off above n ≈ 1000; xTB has crashed unpredictably at high atom counts, so no larger sizes are included |
 
 Reference results from the production library are in `reference/` (`scripts/make_reference.py`): for every structure, uhf = the two lowest spin states its electron count allows (0/2 or 1/3) × electronic temperature 100 / 300 / 1000 K, 174 single points. Each JSON holds the energy, full gradient, Mulliken charges, orbital eigenvalues and occupations (C API), HOMO–LUMO gap, SCC iteration count (parsed from xTB's own iteration table), converged flag and wall time; `SUMMARY.tsv` has one line per run. Settings are production's: accuracy 1.0, maxiter 250, fresh results object per single point.
 
@@ -150,7 +151,7 @@ This repository (github.com/philipturner/xtb-diagonalization, private) is the wh
 | `BRIEF.md` | This plan and its acceptance criteria |
 | `baseline.md`, `LOG.md` | Phase 1 measurements; one log entry per session |
 | `xtb/` | Git submodule: the fork github.com/philipturner/xtb, at `68fe777` (= grimme-lab/xtb `main`, 2026-10-08). Remote `upstream` = grimme-lab/xtb. Full history, so `git log -S` works |
-| `structures/` | Test set (30 `.xyz`) and `MANIFEST.tsv` |
+| `structures/` | Test set (33 `.xyz`) and `MANIFEST.tsv` |
 | `reference/` | Production-library results per structure × uhf × electronic temperature, and `SUMMARY.tsv` |
 | `scripts/make_reference.py` | Benchmark/reference driver: production C API call sequence; `--lib` picks the library, `--out` the output folder |
 | `scripts/build_xtb.sh` | Builds a tree the way production is built (out of source, under `build/`) |

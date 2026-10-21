@@ -9,7 +9,8 @@ git clone --recurse-submodules https://github.com/philipturner/xtb-diagonalizati
 
 - `xtb/`: submodule, fork of [grimme-lab/xtb](https://github.com/grimme-lab/xtb) at `68fe777`; add the upstream remote
   with `git -C xtb remote add upstream https://github.com/grimme-lab/xtb`.
-- `structures/`: 30 test geometries (n = 124–776 basis functions; closed- and open-shell, small-gap, off-equilibrium),
+- `structures/`: 33 test geometries (n = 124–1788 basis functions; closed- and open-shell, small-gap, off-equilibrium,
+  plus a large-n hexagonal SiC family),
   described in `structures/MANIFEST.tsv`.
 - `reference/`: GFN2 results from the production library (xtb 6.7.1 + Accelerate) for every structure × two spin
   states × electronic temperature 100 / 300 / 1000 K: energy, gradient, charges, orbital eigenvalues and occupations,
