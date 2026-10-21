@@ -5,28 +5,33 @@ All times: M1 Max, Accelerate, 1 thread, median of 5 cold single points, 300 K, 
 
 ## Headline
 
-`diagonalization` (fork commit `6c6fd43`) is **1.30–1.63x faster** than the production library per single point and
-passes every gate on all 174 runs. With opt-in FP32 early cycles (`XTB_SCC_FP32_RMSQ=1e-3`) it is **1.55–1.92x**
-faster, but fails the gates on five 100 K runs. Final timing: three round-robin rounds of median-of-5, spread ≤ 3.6%.
+`diagonalization` (fork commit `e891e78`) is **1.51–1.89x faster** than the production library per single point and
+passes every gate on all 174 runs. With opt-in FP32 early cycles (`XTB_SCC_FP32_RMSQ=1e-3`) it is **1.66–2.08x**,
+but fails the gates on five 100 K runs. Timing: three round-robin rounds of median-of-5, spread ≤ 3.1%.
 
 | Case (n) | production library | `diagonalization` | + FP32 early cycles (opt-in) |
 | --- | --- | --- | --- |
-| `t2_R` (124) | 0.045 s | 0.029 s (1.56x) | 0.026 s (1.73x) |
-| `facet_closed` (412) | 0.573 s | 0.396 s (1.45x) | 0.352 s (1.63x) |
-| `s12_C31` (419) | 1.559 s | 1.192 s (1.31x) | 0.984 s (1.58x) |
-| `facet_dbpair_tool` (448) | 1.100 s | 0.843 s (1.30x) | 0.708 s (1.55x) |
-| `s3_S42_159` (619) | 2.218 s | 1.617 s (1.37x) | 1.399 s (1.59x) |
-| `diamond233` (776) | 2.316 s | 1.422 s (1.63x) | 1.206 s (1.92x) |
+| `t2_R` (124) | 0.045 s | 0.028 s (1.64x) | 0.025 s (1.82x) |
+| `facet_closed` (412) | 0.581 s | 0.349 s (1.66x) | 0.327 s (1.77x) |
+| `s12_C31` (419) | 1.553 s | 1.032 s (1.51x) | 0.931 s (1.67x) |
+| `facet_dbpair_tool` (448) | 1.101 s | 0.731 s (1.51x) | 0.665 s (1.66x) |
+| `s3_S42_159` (619) | 2.224 s | 1.400 s (1.59x) | 1.293 s (1.72x) |
+| `diamond233` (776) | 2.343 s | 1.241 s (1.89x) | 1.128 s (2.08x) |
 
-**Throughput** (what production sees): `diagonalization` at 8 processes × 1 thread runs **1.61x** (n = 448: 4.29 → 6.91
-jobs/s) and **1.75x** (n = 655: 1.80 → 3.14 jobs/s) as many single points as the production library at production's
-6 × 2.
+Where it comes from (each step passes both gate sets): #1465 integrals, #1466 SCC linear algebra, #1464 dispersion
+gradient (upstream PRs by g8j39, merged), multipole moments summed per atom pair (`6c4b68f`, −3.5–5.5%), and a
+tridiagonal reduction with a NEON symmetric matrix-vector product (`e891e78`, −9–13%).
+
+**Throughput, what production sees: 2x reached.** `diagonalization` at 8 processes × 1 thread runs **2.07x** as many
+single points as the production library at production's 6 × 2 (n = 448: 4.17 → 8.63 jobs/s, measured back to back)
+and about **2.0x** at n = 655 (1.80 → 3.59 jobs/s). About 1.3x of it is the library at 6 × 2 (n = 448: 6.21 jobs/s), the
+rest the switch to 8 × 1.
 
 **Drop-in:** the production Python wrapper (`xtb_lib.py`, unchanged, `LIB` pointed at the build) runs it and agrees
 with the production library to 1e-13 Eh and 7e-13 Eh/bohr on three production systems. Swift not checked.
 
-The 2x goal per single point at n ≈ 410–450 is not reached under the gates. What is left: the eigensolve is still
-62–76% of a single point, and within it the tridiagonal reduction (`dsytrd`, BLAS2) is about half.
+Per single point at n ≈ 410–450, 2x is not reached under the gates (1.51–1.66x). What is left: the eigensolve is
+still ~70% of a single point; within it `dstedc` (its scalar secular-equation solver) and the reduction share most.
 
 ## Phase 1
 
@@ -63,6 +68,9 @@ production library at the same accuracy), and production accuracy only checks sa
   term #1464 changes runs once per single point after the SCC (it isn't self-consistent in GFN2); its extra memory is
   four atom × atom matrices (2.4 MB at 275 atoms), freed on return.
 - **Hook point:** #1466's `fact_solve_subspace` / `fact_backtransform` is where every SCC eigensolve now goes.
+- **Beyond the brief:** Accelerate's `dsymv` reads the matrix at ~30 GB/s; a NEON kernel reaches ~50 GB/s. LAPACK's
+  `dsytrd` ported with it (`src/mctc/lapack/sytrd.c`) is 30% faster and, with Accelerate's `dsymv`, reproduces
+  Accelerate's `dsytrd` bit for bit. `mmompop` restructured by atom pairs: −40% of the population stage.
 
 ## Phase 3
 
@@ -99,7 +107,8 @@ production library at the same accuracy), and production accuracy only checks sa
 ## Decisions for you
 
 1. Whether to accept FP32 early cycles for 300 K production use (it fails only 100 K gates).
-2. Whether to push `diagonalization` and open nothing upstream yet (the three PRs are g8j39's, still open).
+2. Whether to push `diagonalization` (local commits only; the three PRs in it are g8j39's, still open upstream), and
+   whether to offer `sytrd.c` and the `mmompop` change upstream.
 3. Whether to run production as 8 processes × 1 thread: +15–23% throughput with the current library, and with
-   `diagonalization` 1.61–1.75x production's current throughput (measured).
+   `diagonalization` about 2x production's current throughput (measured).
 4. Whether to pursue a safer SCC accelerator (the damping experiment shows cycle count is the biggest lever left).

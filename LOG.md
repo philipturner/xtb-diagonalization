@@ -81,3 +81,5 @@
 - **Vectorized tridiagonal reduction** (`e891e78`, `src/mctc/lapack/sytrd.c`): LAPACK's dsytrd ported with a NEON
   symmetric matrix-vector product (~50 vs ~30 GB/s); dsytrd −30%, single points −9–13%; gates pass, cycles unchanged.
   An 8-column kernel variant gains little at n ≈ 450 (not used).
+- **Tip timing** (`build/final2/`, round-robin ×3): 1.51–1.89x per single point vs the production library (gated),
+  1.66–2.08x with FP32. **Throughput** at 8 × 1 vs production at 6 × 2: 2.07x (n = 448), ~2.0x (n = 655).
