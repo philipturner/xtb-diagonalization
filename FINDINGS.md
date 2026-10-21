@@ -36,7 +36,12 @@ with the production library to 1e-13 Eh and 7e-13 Eh/bohr on three production sy
 it passes the gates on all 174 runs (cycles unchanged) and is 1.38–1.67x faster per single point. Swift not checked.
 
 Per single point at n ≈ 410–450, 2x is not reached under the gates (1.51–1.66x). What is left: the eigensolve is
-still ~70% of a single point; within it `dstedc` (its scalar secular-equation solver) and the reduction share most.
+68–77% of a single point at n = 412–619 (timers on `aa5ecd7`; production: 56–69%, the other stages shrank more);
+within it `dstedc` (its scalar secular-equation solver) and the reduction share most. 2x over production per single
+point needs the eigensolve ~25–32% faster at n = 412–448.
+
+**Seeded work (warm starts, separate from cold):** a fixed seed plus FP32 early cycles saves 38.1% of wall time over
+cold FP64 on the `diagonalization` tip (five scans, 55 points, all within the production-accuracy gate); see Phase 3.
 
 ## Phase 1
 
@@ -96,6 +101,14 @@ production library at the same accuracy), and production accuracy only checks sa
   with the equally accurate vectorized FP32 reduction, `facet_bare_dimer` uhf 0 at **300 K** stops converging instead.
   Even one FP32 cycle changes those trajectories; a later switch doesn't help. Which fragile run breaks depends on
   rounding details, so FP32 needs a safeguard (for example: fall back to FP64 when the SCC stalls) before production use.
+- **FP32 with fixed-seed warm starts** (`scripts/fp32seed.py`; five scans to the `_rms15` copies, 11 points, seed =
+  converged cold FP64 result at the first point, median of 5): the two levers are nearly independent. Wall time vs cold
+  FP64: FP32 −18.5%, seed −25.8%, both **−38.1%** (product of the two alone −39.5%); per scan −26% to −48%. Seeded runs
+  still spend 72% of their cycles above the FP32 switch (cold: 78%), so FP32 keeps a 16.6% saving. All 55 points pass
+  the production-accuracy gate in every mode. Over the whole grid (`noise.py`, 336 starts seeded from neighbouring
+  temperatures and displaced copies), FP32 adds no seeded-start failures: the same 3 starts fail to converge and the
+  same 2 reach the known second solution as in FP64. The one cold failure FP32 causes, `facet_bare_dimer` uhf 0 at
+  300 K, converges seeded from 100 K in 14 cycles to the cold FP64 solution (dE 1.2e-8 Eh). Only rmsq = 1e-3 tested.
 - **Cycle count (side experiment, `diag/broyden`):** Broyden damping 0.2–0.3 instead of xTB's 0.40 cuts SCC cycles on
   the slow open-shell systems by 19–51% and over the grid by 13.6%, but moves `facet_bare_dimer` uhf 0 at 100 K to a
   different SCF solution 3.0 mEh higher (gap 1.54 instead of 0.20 eV) and doubles another run's cycles. Not usable as
@@ -116,11 +129,18 @@ production library at the same accuracy), and production accuracy only checks sa
   (`$NEWLAPACK`); its eigenvalues are as accurate as one-stage FP32 (relative error 1.5–3.6e-6 on four GFN2
   matrices), and it refuses eigenvectors (info −1), like `dsyevd_2stage`.
 - **New-interface `dstedc`:** 5% slower than the legacy one; nothing to gain from switching interfaces.
+- **Swift port of the vectorized reduction** (`Package.swift`, `Sources/Diagonalization`), as the base for prototyping
+  a two-stage diagonalizer: bit-identical to `sytrd.c` without FP contraction, FP64 and FP32; vs Accelerate at the same
+  precision 1.33–1.42x (`dsytrd`) and 1.66–1.84x (`ssytrd`) at n = 412–776, Swift/C 0.97–1.02. Linked into libxtb
+  (`scripts/build_xtb_swift.sh`, xtb option `XTB_SYTRD_LIBRARIES`): both gate sets 174/174, single points Swift/C
+  0.996–1.010, still one file with no Swift runtime dependency.
 
 ## Decisions for you
 
 1. Whether FP32 early cycles are worth a safeguard (restart the SCC in FP64 when it stalls): +12–25% per single point,
-   but as is it breaks fragile runs, including one at 300 K. It stays off by default.
+   but as is it breaks fragile cold runs, including one at 300 K. It stays off by default. For seeded work it added no
+   failures over the grid and stacks with the seed (−38.1% together), so enabling it only for seeded single points is
+   an option even without the safeguard.
 2. Whether to push `diagonalization` and `diag/production` (local commits only; the three PRs in them are g8j39's,
    still open upstream), whether to hand `diag/production` over as the production library (after a Swift check), and
    whether to offer `sytrd.c` and the `mmompop` change upstream.
