@@ -118,3 +118,17 @@
   max|dg| ≤ 4.0e-7). Single points (`bench.py`, two alternating rounds): Swift/C 0.996–1.010.
 - **Next:** prototype the two-stage reduction in `Sources/Diagonalization` against `sytrd-bench`; needs its own
   back-transformation entry point (the current hook only replaces `xtb_dsytrd_upper`).
+- **FP32 early cycles × fixed-seed warm starts** (`scripts/fp32seed.py`, tip `aa5ecd7`, `XTB_SCC_FP32_RMSQ=1e-3`;
+  five scans structure → `_rms15`, 11 points, seed = converged cold FP64 result at t = 0, modes interleaved, median of
+  5; `build/fp32seed.json`). Totals over 55 points: cold FP64 2579 cycles 41.0 s; cold FP32 2587 (2028 in FP32) 33.4 s
+  (−18.5%); seed FP64 1890, 30.4 s (−25.8%); seed FP32 1892 (1365 in FP32) 25.4 s (**−38.1%**; the product of the two
+  alone would be −39.5%). FP32 still saves 16.6% when seeded: seeded runs spend 72% of their cycles above the switch
+  (cold: 78%), so the levers are nearly independent. Per scan, both: −26% (`facet_closed`) to −48% (`s12_C31`). Every
+  mode passes the production-accuracy gate against cold FP64 at all 55 points (max|dg| 4.8e-5 Eh/bohr). Moderate
+  background load (Chrome); ratios are interleaved.
+- **Grid-wide seeded starts** (`noise.py`, tip library, FP64 → `build/noise-tip64`, FP32 → `build/noise-tip32`; 336
+  starts from neighbouring temperatures and displaced copies): the failing seeded starts are the same with and
+  without FP32 (3 not converged: `facet_bare_dimer` u0 300 K from 1000 K, `facet_closed_rms15` u2 100 K ×2; 2 on the
+  known second solution of `facet_closed_rms15` u2 300 K). Cold FP32 loses `facet_bare_dimer` u0 300 K (known) and
+  converges `s12_C31` u3 100 K (unconverged in production too); seeded from 100 K, FP32 reaches the cold FP64 solution
+  of `facet_bare_dimer` 300 K in 14 cycles (dE 1.2e-8 Eh, max|dg| 8.9e-6). FP64 tip noise matches the main build's.
