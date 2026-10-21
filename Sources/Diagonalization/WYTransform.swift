@@ -12,8 +12,8 @@
 //   BandFormBackTransformation.swift    the kept V and T per panel (wyApply), no rebuild
 // wyFactor and wyApply are Accelerate's larft and larfb (larfb: a triangular product with V's top block, a gemm with
 // the rest, a triangular product with T, then the same in reverse). swift-xtb's WYTransform built T in blocks of a
-// "small block size" with sger/sgemm and applied V, T, V as three sgemm calls; the measured gap between that and
-// larft/larfb hasn't been measured here yet.
+// "small block size" with sger/sgemm and applied V, T, V as three sgemm calls; that version hasn't been compared with
+// larft/larfb here yet.
 
 /// T of Q = H_1 ... H_count = I - V T V^T (forward, column-wise V of height rows; tau from geqrf or larfg).
 @inline(__always)
