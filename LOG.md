@@ -326,3 +326,27 @@
   total cycles +1.8%. Opt-in only; the caller sets the variable around (warm-started) calls. Next: cold perturbation
   study FP32 vs FP64 (rate of different SCF solutions), then rmsq thresholds and an early-abort rule, to decide whether
   FP32 can be the default.
+- **Can FP32 be the default? Basin study, error sources, FP64 refinement** (2026-10-21, continued).
+  Displaced-copy study (`scripts/basin.py`, `build/basin/`; 20 seeded copies at 0.03 Å rms of `facet_bare_dimer`,
+  `s12_C00`, `s12_C31`, `facet_closed_rms15` × 2 spins × 3 temperatures, cold FP64 and FP32 rmsq 1e-3 with the
+  restart): 456/480 same solution, **0 different solutions**, 20 unconverged in both, 4 converged only with FP32 (two
+  within 2e-5 Eh of where FP64 stalls; two where FP64 diverges, unverified). 8 restarts (all 100 K radicals but one);
+  counting each failed 160-cycle attempt, FP32 used 3.2% more cycles than FP64 on the same-solution runs.
+  Error sources (`scripts/kernels/fp32_error.c`, 5 dumped matrices, occupied subspace vs FP64): all-FP32 sin(angle)
+  1.7–8.6e-6; FP32 in one stage only (reduction, divide and conquer, or back-transformation) 1.0–2.2e-6 each, so no
+  stage dominates. One FP64 first-order correction (residual form R = A Z − Z e; the plain projection of A Z made it
+  worse, the FP32 vectors' non-orthogonality is as large as the error) + Cholesky QR: 3.8e-12–4.1e-11.
+  Cost (`scripts/kernels/refine_cost.c`, n = 776, k = 420): FP64 eigensolve 47.0 ms, FP32 28.8; full refinement 20.9
+  (k × k Rayleigh–Ritz dsyevd 11.8) + full-width sormtr 2.6, as much as FP32 saves. Cheaper scheme (xtb `338c72a`,
+  `XTB_SCC_FP32_REFINE=1`): first-order step of each z_i against all z_j (j ≠ i), pairs closer than 1e-3 Eh skipped,
+  Rayleigh quotients for eigenvalues, Cholesky QR, Rayleigh–Ritz only on the skipped clusters (≤ 2 orbitals): subspace
+  ~1e-9, eigenvalues ≤ 5.4e-9 Eh. Cold grid: approx gates 177/177 (plain FP32 175/177), cycles +0.03%; vs the same
+  library's FP64 grid 184/192 within tight thresholds, the other 8 open-shell radicals at their SCC noise floor;
+  test runs within ~1e-12 Eh of FP64, `facet_bare_dimer` u0 300 K in FP64's 52 cycles.
+  Timing (`build/bench-refine3`, `build/sweep-refine`, idle 17:35–17:50, two passes in opposite order), relative to
+  FP64: 1 thread FP32 0.80–0.88, refined 0.91–0.98; throughput 1x1 FP32 1.16–1.26x, refined 1.02–1.12x; **8x1 FP32
+  1.15–1.25x, refined 0.95–0.98x** (n = 448 / 619 / 776). The refinement's FP64 GEMMs contend for the shared AMX
+  units, while FP32's saving is in the reduction. Refinement stays opt-in; plain FP32 + restart is the throughput
+  option.
+- **Tooling note:** `make_reference.py --help` isn't help: it started the production run and wrote two missing
+  sic_n1788 references into `reference/` (stopped; both deleted; nothing overwritten).
