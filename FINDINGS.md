@@ -106,7 +106,8 @@ production library at the same accuracy), and production accuracy only checks sa
 
 ## Phase 4
 
-- **Two-stage reduction doesn't pay at production sizes.** Accelerate's `dsytrd_2stage` (new LAPACK interface,
+- **Accelerate's two-stage reduction doesn't pay at production sizes** (swift-xtb's Swift stages were not ported or
+  timed). Accelerate's `dsytrd_2stage` (new LAPACK interface,
   reduction only) is no faster than `dsytrd` at n = 412–448 and 17–20% faster at 619–776, before the second-stage
   eigenvector back-transformation that neither Accelerate nor reference LAPACK provides. The brief's expectation holds.
 - FP32 `ssytrd` is 1.4x faster than `dsytrd`, `sstedc` 1.5x faster than `dstedc`: the FP32 route (Phase 3 C) is the
