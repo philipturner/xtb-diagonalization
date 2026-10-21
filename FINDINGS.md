@@ -117,7 +117,8 @@ production library at the same accuracy), and production accuracy only checks sa
 
 ## Decisions for you
 
-1. Whether to accept FP32 early cycles for 300 K production use (it fails only 100 K gates).
+1. Whether FP32 early cycles are worth a safeguard (restart the SCC in FP64 when it stalls): +12–25% per single point,
+   but as is it breaks fragile runs, including one at 300 K. It stays off by default.
 2. Whether to push `diagonalization` and `diag/production` (local commits only; the three PRs in them are g8j39's,
    still open upstream), whether to hand `diag/production` over as the production library (after a Swift check), and
    whether to offer `sytrd.c` and the `mmompop` change upstream.
