@@ -38,6 +38,9 @@ static int cmp(const void *a, const void *b) { double x = *(const double *)a, y 
 static double median(double *t, int n) { qsort(t, n, 8, cmp); return t[n / 2]; }
 
 // ---- unsymmetrized reduction: sytrd.c's latrd_u / sytd2_u / sytrd_u with full-matrix BLAS ----
+// UNSYM_GEMV=T multiplies by the transpose (the same product, A being symmetric): Accelerate's dgemv 'T' reads the
+// matrix 2-3x faster than 'N' (scripts/kernels/gemv_bw.c).
+static const char *gemv_trans = "N";
 #define GEN(T, P, SYMV, DOT, SUF)                                                                                   \
 static void latrd_##SUF(lint n, lint nb, T *a, lint lda, T *e, T *tau, T *w, lint ldw, int sym) {                    \
   const T one = 1, mone = -1, zero = 0, half = 0.5; const lint i1 = 1;                                             \
@@ -54,7 +57,7 @@ static void latrd_##SUF(lint n, lint nb, T *a, lint lda, T *e, T *tau, T *w, lin
       e[i - 2] = A_(i - 1, i);                                                                                     \
       A_(i - 1, i) = one;                                                                                          \
       if (sym) SYMV(im1, one, a, lda, &A_(1, i), &W_(1, iw));                                                      \
-      else P##gemv_("N", &im1, &im1, &one, a, &lda, &A_(1, i), &i1, &zero, &W_(1, iw), &i1);                       \
+      else P##gemv_(gemv_trans, &im1, &im1, &one, a, &lda, &A_(1, i), &i1, &zero, &W_(1, iw), &i1);                \
       if (i < n) {                                                                                                 \
         lint m = n - i;                                                                                            \
         P##gemv_("T", &im1, &m, &one, &W_(1, iw + 1), &ldw, &A_(1, i), &i1, &zero, &W_(i + 1, iw), &i1);          \
@@ -77,7 +80,7 @@ static void sytd2_##SUF(lint n, T *a, lint lda, T *d, T *e, T *tau, int sym) {  
     if (taui != 0) {                                                                                               \
       A_(i, i + 1) = one;                                                                                          \
       if (sym) SYMV(i, taui, a, lda, &A_(1, i + 1), tau);                                                          \
-      else P##gemv_("N", &i, &i, &taui, a, &lda, &A_(1, i + 1), &i1, &zero, tau, &i1);                             \
+      else P##gemv_(gemv_trans, &i, &i, &taui, a, &lda, &A_(1, i + 1), &i1, &zero, tau, &i1);                      \
       T alpha = -half * taui * DOT(i, tau, &A_(1, i + 1));                                                         \
       P##axpy_(&i, &alpha, &A_(1, i + 1), &i1, tau, &i1);                                                          \
       if (sym) P##syr2_("U", &i, &mone, &A_(1, i + 1), &i1, tau, &i1, a, &lda);                                    \
@@ -238,6 +241,8 @@ static void reduction(const char *path, int reps) {
 
 int main(int argc, char **argv) {
   int reps = argc > 2 ? atoi(argv[2]) : 21;
+  if (getenv("UNSYM_GEMV")) gemv_trans = getenv("UNSYM_GEMV");
+  printf("unsymmetrized gemv: '%s'\n", gemv_trans);
   components(201);
   if (argc > 1) reduction(argv[1], reps);
   return 0;

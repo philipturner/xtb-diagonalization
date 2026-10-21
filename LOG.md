@@ -141,3 +141,9 @@
   vs NEON `symv` 16.3 µs. The first Swift numbers (FP64 1.76× at n = 448) were an alignment artifact: Accelerate's
   full-matrix kernels are slow on buffers 32 bytes off a 64-byte boundary, where Swift arrays put their elements;
   `sytrd-bench` now uses page-aligned buffers (Accelerate `dsytrd` also 5% faster there: 6.26 vs 6.60 ms).
+- **gemv bandwidth sweep** (`scripts/kernels/gemv_bw.c`, n = 64–3000, page-aligned): the FP32 vs FP64 gap is
+  Accelerate's `dgemv 'N'` only (49–66 GB/s at n = 200–776); `dgemv 'T'` reaches 100–155 GB/s like `sgemv`. Strides that
+  are multiples of 64 bytes are faster for every kernel. Beyond L2 (n ≥ 2048 FP64) everything falls to 15–55 GB/s.
+  With `'T'` the unsymmetrized C reduction is 0.83–1.14× the symmetric one in FP64 (n = 448: 3.78 vs 4.54 ms) and
+  0.75–1.18× in FP32. Swift baseline left on `'N'` for now. User's deferral list (b_out = 1 specialization, trailing-
+  block updates, symmetry, joint block sizes) recorded in BRIEF Phase 4 step 6: only after first benchmarks.

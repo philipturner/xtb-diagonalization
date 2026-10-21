@@ -276,13 +276,29 @@ Steps:
    `symv`). The two `gemm`s and `ger`s cost 1.5–3× their symmetric versions in both precisions. Pitfall: Accelerate's
    full-matrix kernels slow down on buffers 32 bytes off a 64-byte boundary (Swift arrays): the FP64 unsymmetrized
    reduction took 8.0 instead of 6.1 ms at n = 448.
+   **The FP32/FP64 gap is Accelerate's `dgemv 'N'`, not FP64** (`scripts/kernels/gemv_bw.c`, n = 64–3000): `dgemv 'T'`
+   reads FP64 matrices at 100–155 GB/s while they fit in L2 (as fast as `sgemv` 'N' or 'T'); only `dgemv 'N'` is slow
+   (49–66 GB/s at n = 200–776, 29–34 at n = 1024–1600). All kernels speed up when the column stride is a multiple of
+   64 bytes (n = 448, 512, 776 in FP64). Our NEON `symv` reads ~50 GB/s flat, Accelerate's `xsymv` 15–30. With
+   `'T'` in the unsymmetrized C reduction (`UNSYM_GEMV=T`), unsymmetrized / symmetric becomes FP64 1.11/0.83/1.14/0.97
+   and FP32 1.06/0.75/1.18/0.98 at n = 412/448/619/776: unsymmetrized FP64 at n = 448 is faster than our symmetric
+   reduction (3.78 vs 4.54 ms). The Swift baseline still uses `'N'`; switching it is a one-line change, not yet made.
+   Raw AMX programming is shelved unless this kind of gap turns out to matter.
 2. **End-to-end harness:** reduce → `dstedc` → back-transform m eigenvectors on the dumped GFN2 matrices, per-stage
    times (the draft's breakdown); baselines: unsymmetrized and symmetric 1-stage + `dormtr`. Correctness: eigenvalues
    against `dsyevd`, residual ‖H Z − Z Λ‖, orthogonality ‖Zᵀ Z − I‖.
 3. **2-stage:** dense → band (trailing block only) and band → tridiagonal, both back-transformations; sweep b = 8–64.
 4. **3-stage:** general band → band stage, configuration `[b1, b2]`; sweep (b1, b2).
 5. **Throughput:** jobs per second with 8 processes × 1 thread against the 1-stage reduction.
-6. **Later:** symmetry, band storage, NEON kernels for the small bulge blocks, pipelining.
+6. **Later, only once benchmarks show they matter** (user, 2026-10-21): get code that works first, measure, then decide.
+   - A specialized path for the last stage (b_out = 1), possibly code generalized from larger block sizes inlined
+     for small ones.
+   - Updating only the trailing block instead of the full n × n matrix (the draft's ~3× redundant work).
+   - Exploiting symmetry (half the work), band storage.
+   - Choosing the block sizes jointly; an optimization should help all block sizes, or at least not hurt the
+     important range.
+   - NEON kernels for the small bulge blocks, pipelining between stages.
+   Expect FP64 and FP32 to behave differently throughout.
 7. **Into xTB:** a C entry point for the whole eigensolve (the current `XTB_SYTRD_LIBRARIES` hook only replaces the
    reduction), then both gate sets.
 
