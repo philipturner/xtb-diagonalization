@@ -69,6 +69,12 @@ void dstedc_(const char *compz, const lint *n, double *d, double *e, double *z, 
 void dormtr_(const char *side, const char *uplo, const char *trans, const lint *m, const lint *n, const double *a,
              const lint *lda, const double *tau, double *c, const lint *ldc, double *work, const lint *lwork,
              lint *info);
+void sstedc_(const char *compz, const lint *n, float *d, float *e, float *z, const lint *ldz, float *work,
+             const lint *lwork, lint *iwork, const lint *liwork, lint *info);
+void sormtr_(const char *side, const char *uplo, const char *trans, const lint *m, const lint *n, const float *a,
+             const lint *lda, const float *tau, float *c, const lint *ldc, float *work, const lint *lwork, lint *info);
+void ssyevd_(const char *jobz, const char *uplo, const lint *n, float *a, const lint *lda, float *w, float *work,
+             const lint *lwork, lint *iwork, const lint *liwork, lint *info);
 void dsyevd_(const char *jobz, const char *uplo, const lint *n, double *a, const lint *lda, double *w, double *work,
              const lint *lwork, lint *iwork, const lint *liwork, lint *info);
 void ssterf_(const lint *n, float *d, float *e, lint *info);

@@ -197,3 +197,20 @@
   111.8: middle stage 22.2 + its back-transformation 9.7 cost more than they save; [64,16] 143.5: the tail chase drops
   24.4 → 13.1 but its blocked back-transformation rises 25.0 → 56.7 (small blocks). Unoptimized; all-general (no fast
   tail) is 6–10× the 1-stage time, dominated by the per-bulge b → 1 steps.
+- **FP32 and throughput of the Phase 4 code** (`eigen-bench --fp32`, `--procs P --jobs K`; until now the Float
+  specializations were compiled but never run, and no Phase 4 kernel had a multi-process measurement).
+  Accuracy, FP32 (checked in FP64 against `dsyevd` of the FP64 matrix): random n = 3–131, all 74 chain runs: residual
+  ≤ 5.4e-7, orthogonality ≤ 2.5e-6, zero out-of-band leftovers, eigenvalues ≤ 7.7e-6 (up to 5.6× Accelerate `ssyevd` on
+  the same FP32 matrix at n = 17, where our 1-stage is already 1.9–2.3×: more reduction steps, more roundings). GFN2
+  matrices, 36 runs: eigenvalues 8.5e-6–4.9e-5 Eh, 0.1–0.3× `ssyevd`'s (7.4e-5–2.0e-4 Eh; our 1-stage FP32 is as good
+  as the band variants, so it's `ssyevd` that is less accurate here), residual ≤ 1.0e-6, orthogonality ≤ 2.5e-6.
+  Latency (`build/eigen-fp32.txt` vs `-fp64.txt`, median of 5, all vectors): 1-stage gains 1.6× from FP32, 2-stage
+  only 1.2–1.5×, so 2-stage at its best b is 2.17–2.82× the unsymmetrized 1-stage in FP32 (FP64: 2.05–2.36×) and the
+  best b moves up to 48 (n = 776 FP32: 56.8 ms vs b = 32 67.8). The blocked bulge back-transformation is no faster in
+  FP32 (n = 776, b = 16: 62.4 vs 56.5 ms FP64; b = 32: 28.3 vs 25.0).
+  Throughput (`build/eigen-throughput.txt`, eigensolve alone, 1 vs 8 processes × 1 thread, 100/40 jobs at n =
+  448/776; short runs, 1–6 s): scaling to 8 processes, FP64 n = 448/776: 1-stage sym 6.4/5.6×, unsym 5.7/3.7×, 2-stage
+  b = 32 5.9/5.1×, b = 48 6.1/5.4×; FP32: sym 6.8/6.2×, unsym 6.5/5.2×, 2-stage 6.6–6.7/5.8–6.0×. The current 2-stage
+  code scales like the symmetric 1-stage and better than the unsymmetrized one (whose AMX-bound gemv/gemm contend,
+  as in xTB with `XTB_SCC_TRD=full`); it isn't (yet) losing extra throughput at 8 × 1. 8-process jobs/s, 2-stage best
+  / 1-stage sym: FP64 0.43 (448), 0.47 (776); FP32 0.39, 0.42.
