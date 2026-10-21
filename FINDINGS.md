@@ -32,7 +32,8 @@ rest the switch to 8 × 1.
 commits that the production library carries. Without them, GFN-FF writes `gfnff_topo` into the working directory.
 With them, GFN-FF is bit-identical to production and writes nothing; GFN2 is identical to `diagonalization`.
 The production Python wrapper (`xtb_lib.py`, unchanged, `LIB` pointed at the build) runs it and agrees
-with the production library to 1e-13 Eh and 7e-13 Eh/bohr on three production systems. Swift not checked.
+with the production library to 1e-13 Eh and 7e-13 Eh/bohr on three production systems. At production's 2 threads
+it passes the gates on all 174 runs (cycles unchanged) and is 1.38–1.67x faster per single point. Swift not checked.
 
 Per single point at n ≈ 410–450, 2x is not reached under the gates (1.51–1.66x). What is left: the eigensolve is
 still ~70% of a single point; within it `dstedc` (its scalar secular-equation solver) and the reduction share most.
