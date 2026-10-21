@@ -8,6 +8,8 @@ single points (fresh results object each, production settings). Threads per proc
 OMP_NUM_THREADS and VECLIB_MAXIMUM_THREADS. Throughput = N*K / (time until the last worker finishes).
 Per-worker elapsed times are recorded: on M1 Max (8 P-cores, 2 E-cores) a worker much slower than the rest most
 likely ran on an E-core.
+--fp32 RMSQ [--fp32-maxiter N] [--fp32-refine]: FP32 SCC eigensolves (sccprecision.py), checked on every single point
+when the library can report it.
 """
 import json, os, subprocess, sys, time
 import numpy as np
@@ -31,9 +33,12 @@ def worker(lib, sid, uhf, jobs, start):
     calc = C.c_void_p(L.xtb_newCalculator()); L.xtb_loadGFN2xTB(env, mol, calc, None)
     L.xtb_setAccuracy(env, calc, C.c_double(1.0)); L.xtb_setElectronicTemp(env, calc, C.c_double(300.0))
     L.xtb_setMaxIter(env, calc, C.c_int(250))
+    import sccprecision
+    sccprecision.apply(L, env, calc)
 
     def sp():
-        r = C.c_void_p(L.xtb_newResults()); L.xtb_singlepoint(env, mol, calc, r); L.xtb_delResults(C.byref(r))
+        r = C.c_void_p(L.xtb_newResults()); L.xtb_singlepoint(env, mol, calc, r); sccprecision.check(L, env, r)
+        L.xtb_delResults(C.byref(r))
     sp()  # warm-up
     late = time.time() > start
     while time.time() < start:
@@ -46,6 +51,9 @@ def worker(lib, sid, uhf, jobs, start):
 
 def main():
     a = sys.argv[1:]
+    sys.path.insert(0, HERE)
+    import sccprecision
+    sccprecision.parse(a)
     if a[0] == '--worker':
         return worker(a[1], a[2], int(a[3]), int(a[4]), float(a[5]))
     lib, out = os.path.abspath(a[0]), a[1]
@@ -68,7 +76,7 @@ def main():
         res.append(r)
         print(f"{sid} {nproc:2d} x {nthr} thr: {r['jobs_per_s']:.3f} jobs/s, median job {r['median_job_s']:.3f} s, "
               f"worker elapsed {el[0]:.2f}-{el[-1]:.2f} s{'  (a worker started late)' if r['any_late'] else ''}", flush=True)
-    json.dump(dict(library=lib, case=sid, uhf=int(uhf), load_avg=os.getloadavg(), date=time.strftime('%Y-%m-%d %H:%M'),
+    json.dump(dict(library=lib, scc_eigensolves=sccprecision.label(), case=sid, uhf=int(uhf), load_avg=os.getloadavg(), date=time.strftime('%Y-%m-%d %H:%M'),
                    configs=res), open(out, 'w'), indent=1)
 
 

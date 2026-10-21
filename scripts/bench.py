@@ -9,9 +9,12 @@ If LIB was built with the SCC timers (xtb/src/scc_timer.f90), the per-stage brea
 seconds per single point in each stage, the overlap factorization, the SCC loop total and everything outside the loop
 (integrals, gradient). The timers write one line per cycle, so time wall clock with a build without them.
 Also records each case process's peak resident memory (ru_maxrss, includes Python and numpy).
+--fp32 RMSQ [--fp32-maxiter N] [--fp32-refine]: FP32 SCC eigensolves (sccprecision.py); every timed single point's
+results are checked against the request when the library can report it.
 """
 import ctypes as C, json, os, resource, subprocess, sys, tempfile, time
 import numpy as np
+import sccprecision
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ST = os.path.join(HERE, '..', 'structures')
@@ -46,6 +49,7 @@ def one(lib, sid, uhf, reps, etemp):
     calc = C.c_void_p(L.xtb_newCalculator()); L.xtb_loadGFN2xTB(env, mol, calc, None)
     L.xtb_setAccuracy(env, calc, C.c_double(1.0)); L.xtb_setElectronicTemp(env, calc, C.c_double(etemp))
     L.xtb_setMaxIter(env, calc, C.c_int(250))
+    sccprecision.apply(L, env, calc)
     tfile = os.environ.get('XTB_SCC_TIMERS')
     walls, stages, e = [], [], C.c_double()
     for k in range(reps + 1):
@@ -53,14 +57,14 @@ def one(lib, sid, uhf, reps, etemp):
             open(tfile, 'w').close()
         r = C.c_void_p(L.xtb_newResults())
         t0 = time.perf_counter(); L.xtb_singlepoint(env, mol, calc, r); dt = time.perf_counter() - t0
-        L.xtb_getEnergy(env, r, C.byref(e)); L.xtb_delResults(C.byref(r))
+        L.xtb_getEnergy(env, r, C.byref(e)); prec = sccprecision.check(L, env, r); L.xtb_delResults(C.byref(r))
         if k:
             walls.append(dt)
             if tfile:
                 s = parse_timers(open(tfile).read()); s['outside'] = dt - s['scc_loop']; stages.append(s)
     out = dict(id=sid, uhf=uhf, n_atoms=n, etemp_K=etemp, walls_s=walls, median_s=float(np.median(walls)),
                min_s=min(walls), max_s=max(walls), energy_Eh=e.value, clean=not L.xtb_checkEnvironment(env),
-               peak_rss_MB=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2**20)
+               peak_rss_MB=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2**20, scc_precision=prec)
     if stages:
         out['stages_s'] = {k: float(np.median([s[k] for s in stages])) for k in stages[0]}
     print(json.dumps(out), flush=True)
@@ -68,6 +72,7 @@ def one(lib, sid, uhf, reps, etemp):
 
 def main():
     a = sys.argv[1:]
+    sccprecision.parse(a)
     if a[0] == '--one':
         return one(a[1], a[2], int(a[3]), int(a[4]), float(a[5]))
     lib, out = os.path.abspath(a[0]), a[1]
@@ -88,7 +93,7 @@ def main():
         s = r.get('stages_s')
         print(f"{sid:20s} u{uhf} median {r['median_s']:.3f} s (min {r['min_s']:.3f}, max {r['max_s']:.3f})  peak {r['peak_rss_MB']:.0f} MB"
               + (f"  cycles {s['cycles']:.0f}  eigensolve {s['eigensolve'] / r['median_s']:.0%}" if s else ''), flush=True)
-    meta = dict(library=lib, reps=reps, etemp_K=etemp, threads=dict((k, os.environ.get(k)) for k in
+    meta = dict(library=lib, reps=reps, etemp_K=etemp, scc_eigensolves=sccprecision.label(), threads=dict((k, os.environ.get(k)) for k in
                 ('OMP_NUM_THREADS', 'VECLIB_MAXIMUM_THREADS')), timers='XTB_SCC_TIMERS' in os.environ,
                 date=time.strftime('%Y-%m-%d %H:%M'), load_avg=os.getloadavg())
     json.dump(dict(meta=meta, cases=res), open(out, 'w'), indent=1)

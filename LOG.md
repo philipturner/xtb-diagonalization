@@ -353,3 +353,18 @@
 - **Decision (user):** plain FP32 + restart will be the default, legacy FP64 selectable; how the default is set and
   checked (results report the mode in effect and any restart, effective settings printed, malformed values rejected,
   a gate run per mode) is to be worked out later.
+- **C API for the SCC precision** (xtb `e2e5bee`, user's choice over environment variables, which are process-global
+  and unsafe for threads of one Swift process). `xtb_setSCCPrecision(env, calc, fp32_rmsq, fp32_maxiter,
+  fp32_refine)` on the calculator (default FP64; invalid values are errors that change nothing; FP32 on GFN-FF is an
+  error); `xtb_getSCCPrecision(env, res, ...)` on the results: settings used, FP32 cycles, FP64 rerun, SCC cycles
+  (error without an SCC). The library no longer reads `XTB_SCC_FP32_*`; the CLI runs FP64. One diagnostic line at
+  minimal verbosity. The restart no longer writes the process-global `set%broydamp`. Driver scripts set the mode
+  through the API (`scripts/sccprecision.py`: `--fp32 RMSQ [--fp32-maxiter N] [--fp32-refine]` for make_reference,
+  bench, sweep, basin; fp32seed uses the setter) and check every result's report against the request.
+  Validation: FP64 via the API 174/174 bit-identical to `1c9a9c5`; FP32 1e-3 via the API 192/192 bit-identical to
+  the environment-variable FP32 grid, approx gates vs production 175/177 (the two known cycle-count cases); 384/384
+  runs report exactly the requested settings (3 FP64 reruns, all reported). Contract test
+  `scripts/test_sccprecision.py`: 16/16, including FP32 and FP64 calculators in two threads of one process, each
+  bit-identical to its serial result, and the production library (no API: FP64 runs, FP32 request refused).
+  Next: Swift bindings (user's branch): dlsym both symbols; missing → FP64, FP32 request traps; set per calculator,
+  check the getter after every single point.

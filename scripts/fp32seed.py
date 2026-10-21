@@ -7,10 +7,12 @@ maxiter 250).
 Scans interpolate linearly from structures/<id>.xyz (t = 0) to structures/<to>.xyz (t = 1), as in warmstart.py. Every
 point is computed four ways, interleaved so drift hits all alike:
   cold64  fresh xtb_newResults, FP64 throughout (production)
-  cold32  fresh xtb_newResults, XTB_SCC_FP32_RMSQ set (FP32 eigensolves while the charge rms change > rmsq)
+  cold32  fresh xtb_newResults, FP32 eigensolves while the charge rms change > rmsq (xtb_setSCCPrecision)
   seed64  copy (xtb_copyResults) of the converged cold64 result at t = 0, like swift-xtb's xTB_Seed
-  seed32  the same seed, XTB_SCC_FP32_RMSQ set
-xtb reads XTB_SCC_FP32_RMSQ at the start of every SCC, so the modes switch within one process. Per point and mode: one
+  seed32  the same seed, FP32 as cold32
+Each single point gets its own calculator with the mode's precision set (xtb_setSCCPrecision, FP32 attempt capped at
+160 cycles). The measurements in LOG.md predate this: xtb then read the variable XTB_SCC_FP32_RMSQ and had no FP64
+restart (none of those runs failed, so the restart wouldn't have changed them). Per point and mode: one
 run with xtb's output for the cycle count and the FP32 cycle count (cycle k runs in FP32 when k = 1 or the printed rms
 charge change of cycle k-1 exceeds rmsq), then --reps timed runs with output off (median). Each mode's results are
 compared with cold64 against the production-accuracy gate (|dE| <= 5e-7 Eh, max|dg| <= 1e-4 Eh/bohr, gap 5e-5 Eh,
@@ -46,7 +48,8 @@ def main():
         getattr(L, f).restype = C.c_void_p
     L.xtb_checkEnvironment.restype = C.c_int
     L.xtb_copyResults.argtypes = [C.c_void_p]
-    os.environ.pop('XTB_SCC_FP32_RMSQ', None)
+    if not hasattr(L, 'xtb_setSCCPrecision'):
+        raise SystemExit(f'{lib} has no xtb_setSCCPrecision: the FP32 modes cannot be requested')
     results = []
     for sid, uhf, to in cases:
         uhf = int(uhf)
@@ -54,7 +57,7 @@ def main():
         n = len(el)
         log = tempfile.NamedTemporaryFile(suffix='.out', delete=False).name
 
-        def setup():
+        def setup(fp32):
             # a fresh environment per single point: the C API keeps an error after a failed SCF
             env = C.c_void_p(L.xtb_newEnvironment()); L.xtb_setVerbosity(env, 0)
             mol = C.c_void_p(L.xtb_newMolecule(env, C.byref(C.c_int(n)), (C.c_int * n)(*[Z[e] for e in el]),
@@ -63,6 +66,7 @@ def main():
             calc = C.c_void_p(L.xtb_newCalculator()); L.xtb_loadGFN2xTB(env, mol, calc, None)
             L.xtb_setAccuracy(env, calc, C.c_double(1.0)); L.xtb_setElectronicTemp(env, calc, C.c_double(300.0))
             L.xtb_setMaxIter(env, calc, C.c_int(250))
+            L.xtb_setSCCPrecision(env, calc, C.c_double(float(rmsq) if fp32 else 0.0), C.c_int(160), C.c_int(0))
             return env, mol, calc
 
         def free(env, mol, calc):
@@ -70,11 +74,7 @@ def main():
 
         def sp(t, seed, fp32, record):
             """One single point at scan position t; returns wall time, plus results and cycles if record."""
-            if fp32:
-                os.environ['XTB_SCC_FP32_RMSQ'] = rmsq
-            else:
-                os.environ.pop('XTB_SCC_FP32_RMSQ', None)
-            env, mol, calc = setup()
+            env, mol, calc = setup(fp32)
             x = (x0 + t * (x1 - x0)) / 0.52917721067
             L.xtb_updateMolecule(env, mol, (C.c_double * (3 * n))(*x.ravel()), None)
             res = C.c_void_p(L.xtb_copyResults(seed) if seed is not None else L.xtb_newResults())
@@ -142,7 +142,6 @@ def main():
                                      f"{tot[m]['wall_s']:.2f} s fails {tot[m]['fails']}" for m in MODES), flush=True)
         results.append(dict(id=sid, uhf=uhf, to=to, etemp_K=300.0, rmsq=float(rmsq), reps=reps, points=pts,
                             totals=tot))
-    os.environ.pop('XTB_SCC_FP32_RMSQ', None)
     json.dump(dict(library=lib, cases=results), open(out, 'w'), indent=1)
 
 

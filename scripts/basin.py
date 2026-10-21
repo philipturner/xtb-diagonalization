@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Does FP32 (XTB_SCC_FP32_RMSQ) send cold SCF runs to a different solution more often than FP64 does? Seeded random
+"""Does FP32 (xtb_setSCCPrecision, through sccprecision.py) send cold SCF runs to a different solution more often than FP64 does? Seeded random
 displaced copies of the fragile structures, each run cold in FP64 and in FP32 with the same library; per geometry,
 uhf and temperature, whether the two reach the same SCF solution (noise.py's criteria), converge, and their cycles.
 
@@ -49,9 +49,9 @@ def work(job):
     if os.path.exists(f"{out}/{mode}/{sid}_u{u}_T{t:g}.json"):
         return
     os.environ.update(OMP_NUM_THREADS='1', VECLIB_MAXIMUM_THREADS='1')
-    os.environ.pop('XTB_SCC_FP32_RMSQ', None)
+    os.environ.pop('XTB_REF_FP32_RMSQ', None)
     if mode == 'fp32':
-        os.environ['XTB_SCC_FP32_RMSQ'] = rmsq
+        os.environ['XTB_REF_FP32_RMSQ'] = rmsq
     mr.LIB, mr.ST, mr.REF = lib, f"{out}/structures", f"{out}/{mode}"
     mr.one(sid, u, t)
 

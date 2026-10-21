@@ -1,5 +1,5 @@
 // Where does the FP32 eigensolve's error in the occupied subspace come from, and does one FP64 correction step remove
-// it? (FP32 early SCC cycles, XTB_SCC_FP32_RMSQ.)
+// it? (FP32 early SCC cycles, xtb_setSCCPrecision.)
 //   fp32_error HS.bin NOCC
 //   clang -O2 fp32_error.c -framework Accelerate -o fp32_error
 // H' = X^T H X in FP64 (S = U^T U, X = U^-1), as xTB forms it. Reference: FP64 dsytrd + dstedc + dormtr. Variants, each

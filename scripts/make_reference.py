@@ -16,9 +16,13 @@ library path + sha256. Plus reference/SUMMARY.tsv.
 
 --accuracy changes xtb_setAccuracy for validation runs only (e.g. 0.01 for the tight-accuracy gate); production is 1.0.
 --threads sets OMP_NUM_THREADS and VECLIB_MAXIMUM_THREADS per worker (default 1; production Python uses 2).
+--fp32 RMSQ [--fp32-maxiter N] [--fp32-refine]: FP32 SCC eigensolves through xtb_setSCCPrecision (sccprecision.py;
+diagonalization branch, a library without it is an error). Whenever the library has xtb_getSCCPrecision, each run
+records what the results report ('scc_precision') and a mismatch with what was set is an error (default set: FP64).
 """
 import ctypes as C, hashlib, json, os, re, subprocess, sys, tempfile, time
 import numpy as np
+import sccprecision
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -66,6 +70,7 @@ def one(sid, uhf, etemp):
     L.xtb_loadGFN2xTB(env, mol, calc, None)
     L.xtb_setAccuracy(env, calc, C.c_double(ACC)); L.xtb_setElectronicTemp(env, calc, C.c_double(etemp))
     L.xtb_setMaxIter(env, calc, C.c_int(MAXIT))
+    sccprecision.apply(L, env, calc)
 
     def err():
         if not L.xtb_checkEnvironment(env):
@@ -76,6 +81,12 @@ def one(sid, uhf, etemp):
     res = C.c_void_p(L.xtb_newResults())  # cold start, as production
     t0 = time.time(); L.xtb_singlepoint(env, mol, calc, res); wall = time.time() - t0
     msg = err()
+    prec = None
+    try:
+        prec = sccprecision.check(L, env, res)
+    except RuntimeError as x:
+        msg = msg or str(x)
+    msg = msg or err()
     e = C.c_double(); g = (C.c_double * (3 * n))(); q = (C.c_double * n)()
     L.xtb_getEnergy(env, res, C.byref(e)); L.xtb_getGradient(env, res, g); L.xtb_getCharges(env, res, q)
     nao = C.c_int(); L.xtb_getNao(env, res, C.byref(nao))
@@ -94,7 +105,7 @@ def one(sid, uhf, etemp):
              orbital_eigenvalues_Eh=ev.tolist(), orbital_occupations=oc.tolist(), gap_Eh=gap,
              gap_def='lowest eigenvalue with occupation < 0.5 minus highest with > 0.5 (alpha+beta summed occupations)',
              scc_iterations=max(it) if it else None, converged=('SCC converged' in out or 'convergence criteria satisfied' in out) and not msg,
-             error=' | '.join(m for m in (setup_msg, msg, msg2) if m), wall_s=wall,
+             error=' | '.join(m for m in (setup_msg, msg, msg2) if m), wall_s=wall, scc_precision=prec,
              library=LIB, library_sha256=hashlib.sha256(open(LIB, 'rb').read()).hexdigest(),
              api_version=L.xtb_getAPIVersion(), threads=os.environ.get('OMP_NUM_THREADS'))
     os.makedirs(REF, exist_ok=True)
@@ -121,13 +132,14 @@ def main():
         i = a.index('--accuracy'); ACC = float(a[i + 1]); os.environ['XTB_REF_ACCURACY'] = a[i + 1]; del a[i:i + 2]
     if '--lib' in a:
         i = a.index('--lib'); LIB = os.path.abspath(a[i + 1]); os.environ['XTB_LIB'] = LIB; del a[i:i + 2]
+    sccprecision.parse(a)
     if '--out' in a:
         i = a.index('--out'); REF = os.path.abspath(a[i + 1]); os.environ['XTB_REF_OUT'] = REF; del a[i:i + 2]
     REF = os.environ.get('XTB_REF_OUT', REF)
     if not os.path.exists(LIB):
         raise SystemExit(f'no library at {LIB}')
     if a[:1] != ['--one']:
-        print(f'library {LIB}', flush=True)
+        print(f'library {LIB}, SCC eigensolves {sccprecision.label()}', flush=True)
     if a[:1] == ['--one']:
         return one(a[1], int(a[2]), float(a[3]))
     W = int(a[a.index('--workers') + 1]) if '--workers' in a else 4
