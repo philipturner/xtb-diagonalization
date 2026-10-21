@@ -91,16 +91,25 @@ func run<T: BinaryFloatingPoint>(
   var outs = Array(repeating: Output<T>(n), count: variants.count)
   var first = outs
   var repeatable = Array(repeating: true, count: variants.count)
-  var work = [T](repeating: 0, count: 64 * n + 100_000)
+  // Page-aligned matrix and workspace, like gfortran's large allocations in xTB. Accelerate's full-matrix kernels are
+  // alignment-sensitive: with Swift arrays (elements 32 bytes past a 16-byte boundary) the unsymmetrized FP64 reduction
+  // at n = 448 took 8.2 ms instead of 6.1 ms (scripts/kernels/unsym.c, UNSYM_OFFSET=32).
+  let a = UnsafeMutableRawPointer.allocate(byteCount: n * n * MemoryLayout<T>.stride, alignment: 16384)
+    .bindMemory(to: T.self, capacity: n * n)
+  let workCount = 64 * n + 100_000
+  let work = UnsafeMutableRawPointer.allocate(byteCount: workCount * MemoryLayout<T>.stride, alignment: 16384)
+    .bindMemory(to: T.self, capacity: workCount)
+  work.initialize(repeating: 0, count: workCount)
+  defer { a.deallocate(); work.deallocate() }
   for r in -1..<reps {
     for (k, f) in variants.enumerated() {
-      var a = input
+      input.withUnsafeBufferPointer { a.update(from: $0.baseAddress!, count: n * n) }
       var o = outs[k]
       let t0 = now()
-      f(&a, &o.d, &o.e, &o.tau, &work)
+      f(a, &o.d, &o.e, &o.tau, work)
       let t1 = now()
       if r >= 0 { times[k].append(1e3 * (t1 - t0)) }
-      o.a = a
+      o.a = Array(UnsafeBufferPointer(start: a, count: n * n))
       outs[k] = o
       if r == -1 { first[k] = o } else if !identical(n, o, first[k]) { repeatable[k] = false }
     }

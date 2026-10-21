@@ -134,3 +134,10 @@
   of `facet_bare_dimer` 300 K in 14 cycles (dE 1.2e-8 Eh, max|dg| 8.9e-6). FP64 tip noise matches the main build's.
 - **Decision (user):** FP64 fallback for FP32 and a caller-side switch to enable FP32 are deferred; next is Phase 4
   (two-stage diagonalizer, to be specified by the user).
+- **Unsymmetrized 1-stage baseline, verified** (Phase 4 step 1): Swift `tridiagonalize(symmetric: false)` and a
+  separate C implementation (`scripts/kernels/unsym.c`) agree within 5% once buffers are page-aligned. Unsymmetrized /
+  symmetric time at n = 412/448/619/776: FP64 1.38/1.39/1.50/1.64, FP32 1.05/0.88/1.07/0.94. Components (C, n = 448,
+  median of 201): FP32 full `sgemv` 5.0 µs (~160 GB/s) vs NEON `symv` 8.3 µs vs `ssymv` 19.5 µs; FP64 `dgemv` 29.4 µs
+  vs NEON `symv` 16.3 µs. The first Swift numbers (FP64 1.76× at n = 448) were an alignment artifact: Accelerate's
+  full-matrix kernels are slow on buffers 32 bytes off a 64-byte boundary, where Swift arrays put their elements;
+  `sytrd-bench` now uses page-aligned buffers (Accelerate `dsytrd` also 5% faster there: 6.26 vs 6.60 ms).

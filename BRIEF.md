@@ -267,9 +267,15 @@ Design for this repository (`Sources/Diagonalization`, generic FP64/FP32, column
 - **D&C:** Accelerate's `dstedc`, unchanged.
 
 Steps:
-1. **Baseline (done):** `tridiagonalize(symmetric: false)`, gemv/gemm/ger on the full matrix. FP64: 1.39–1.76× the
-   time of the symmetric Swift reduction at n = 412–776 (n = 448: 8.16 vs 4.64 ms; Accelerate `dsytrd` 6.63 ms).
-   FP32: 0.95–1.10× (Accelerate's full `sgemv`/`sgemm` are as fast as the symmetric kernels on half the data).
+1. **Baseline (done):** `tridiagonalize(symmetric: false)`, gemv/gemm/ger on the full matrix, page-aligned buffers.
+   Time relative to the symmetric reduction at n = 412/448/619/776 — FP64: 1.38/1.39/1.50/1.64× (n = 448: 6.21 vs
+   4.46 ms; Accelerate `dsytrd` 6.26 ms); FP32: 1.05/0.88/1.07/0.94×. Reproduced by a separate C implementation
+   (`scripts/kernels/unsym.c`, interleaved and blocked timing, within 5%). Why FP32 doesn't pay for the extra work:
+   Accelerate's full `sgemv` reads the whole matrix at ~160 GB/s (n = 448: 5.0 µs), faster than our NEON `symv` reads
+   half of it (8.3 µs) and than `ssymv` (19.5 µs); FP64 `dgemv` manages only ~55 GB/s (29.4 µs vs 16.3 µs for the NEON
+   `symv`). The two `gemm`s and `ger`s cost 1.5–3× their symmetric versions in both precisions. Pitfall: Accelerate's
+   full-matrix kernels slow down on buffers 32 bytes off a 64-byte boundary (Swift arrays): the FP64 unsymmetrized
+   reduction took 8.0 instead of 6.1 ms at n = 448.
 2. **End-to-end harness:** reduce → `dstedc` → back-transform m eigenvectors on the dumped GFN2 matrices, per-stage
    times (the draft's breakdown); baselines: unsymmetrized and symmetric 1-stage + `dormtr`. Correctness: eigenvalues
    against `dsyevd`, residual ‖H Z − Z Λ‖, orthogonality ‖Zᵀ Z − I‖.
