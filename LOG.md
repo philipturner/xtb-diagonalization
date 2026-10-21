@@ -232,3 +232,22 @@
   8-process jobs/s, 2-stage best / 1-stage sym: FP64 0.63 (1204), 0.78 (1788); FP32 0.47, 0.78 (single process:
   0.43–0.49). With the deferred optimizations (trailing-block stage 1 alone removes ~2/3 of its work) 2-stage may pass
   1-stage in 8 × 1 throughput around n ≈ 1800 first.
+- **Structural optimizations, measured one at a time** (`SBROptions`, `eigen-bench --opts`, `scripts/opt_table.py`,
+  `build/opt-{small,large}-fp{64,32}.txt`; FP64 n = 776 b = 32 / n = 1788 b = 64, ms): stage 1 13.4 / 200 → trailing
+  block only 10.0 / 135 → combined sy2sb update 8.2 / 103 → lower triangle (symm, syr2k) 8.4 / 82 (helps at large n
+  only); bulge chase 24.4 / 322 → lower-triangle symmetric chase 15.2 / 151, plus vector-accumulated dot products
+  (Swift doesn't vectorize an ordered FP reduction) 13.8 at n = 776; skipping the end-of-stage-1 mirror and zero passes
+  when the chase reads only the lower triangle. Not helpful: the parallelogram WY kernel (5 triangular products instead
+  of larfb's 7) is slower with Accelerate's trmm (FP32 n = 776: 25.5 → 44.5 ms); precomputing all bulge WY blocks
+  (`prep`) costs more than rebuilding each just before use (the table is as large as the matrix); column blocks of Z
+  (k128) are slower at every size (the blocks are re-read per column block). Best set `tcs`/`tcls`: 2-stage / 1-stage
+  sym, FP64: 1.69× (n = 412, was 2.16×), 1.67× (776, was 1.97×), 1.69× (1204, was 2.44×), 1.51× (1788, was 2.17×);
+  FP32 n = 1788: 340 vs 199 ms (1.71×, was 2.27×). Accuracy unchanged (FP64 ≤ 8.2e-13 Eh, FP32 ≤ 4.9e-5 Eh).
+- **Code reorganized, one file per step** (user request): `SBROptions` (was TwoStageOptions), `BandForm`, `BandToBand`,
+  `BulgeChasing`, `DivideAndConquer`, `BulgeBackTransformation`, `BandToBandBackTransformation`,
+  `BandFormBackTransformation`, `WYTransform` (every compact-WY build and apply, with a map of where each step uses
+  it), `SuccessiveBandReduction` (driver only: `SBRWorkspace`, `sbrReduce`, `sbrBackTransform`; first stage by
+  BandForm, middle stages by BandToBand, last by BulgeChasing; requires an intermediate bandwidth, 1-stage being
+  `Tridiagonalization.swift`). 2-stage is the chain [b] through the same driver at no extra cost (SBR[tcs] 32 = 2s[tcs]
+  b = 32, same results); 3-stage now gets the optimized first and last stages. Regression: random n = 3–131, 98 runs,
+  eigenvalues ≤ 5.3e-14, zero out-of-band leftovers.

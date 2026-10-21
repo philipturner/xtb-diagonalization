@@ -10,10 +10,16 @@
 // --fp32: every variant in single precision (the matrix is rounded to FP32 first). Accuracy is still measured in FP64
 // against dsyevd of the FP64 matrix; the line "Accelerate ssyevd" gives FP32's own floor on the same matrix.
 // --unblocked-bulges: stage 2's back-transformation one reflector at a time (the reference) instead of blocked.
-// --sbr 64-16,32: successive band reduction variants (SuccessiveBandReduction.swift), here 3-stage n-1 -> 64 -> 16 -> 1
-// and 2-stage n-1 -> 32 -> 1; each stage and back-transformation timed. --whole: SBR updates span the whole matrix
-// instead of a window (cross-check). The check line adds each SBR stage's largest entry outside its target band.
-// --fast-tail: the SBR variants' last stage (b -> 1) by TwoStage.swift's bulge chase and blocked back-transformation.
+// --sbr 64-16,32: successive band reduction variants through the driver (SuccessiveBandReduction.swift: BandForm,
+// BandToBand for middle stages, BulgeChasing, and their back-transformations), here 3-stage n-1 -> 64 -> 16 -> 1 and
+// 2-stage n-1 -> 32 -> 1; each stage and back-transformation timed. --sbr-opts SET: SBROptions for them (codes as
+// --opts). --sbr-general: every stage by BandToBand.swift's general routine instead (test reference; with --whole its
+// updates span the whole matrix; --fast-tail: its last stage by BulgeChasing.swift). The check line adds each general
+// stage's largest entry outside its target band.
+// --opts "t;tcl;tclsp;tclspk128": extra 2-stage variants with SBROptions, one per set, named 2s[set]: t trailing
+// block only, c combined (sy2sb) update, l lower triangle, s symmetric chase, p parallelogram back-transformation,
+// kN column blocks of N. With p or k the bulge blocks are precomputed (stage "prep"); otherwise each is built just
+// before it's applied (backTransformBulgesBlocked), which is faster for one thread.
 // --procs P [--jobs K]: throughput instead of latency. For each variant, P copies of this program (one file only)
 // start together and each runs the variant K times (default 20) after a warm-up; reports jobs per second as a work
 // queue sees it (sum over processes of K / elapsed) and the median job time. Run with VECLIB_MAXIMUM_THREADS=1.
@@ -43,11 +49,8 @@ func buffer<R: BinaryFloatingPoint>(_ count: Int, _: R.Type = R.self) -> UnsafeM
   return p
 }
 
-/// The LAPACK calls of the 1-stage path and the divide and conquer, per precision.
+/// The LAPACK calls of the 1-stage path and the reference eigenvalues, per precision.
 protocol EigenScalar: BandReductionScalar {
-  static func stedc(_ n: Int, _ d: UnsafeMutablePointer<Self>, _ e: UnsafeMutablePointer<Self>,
-                    _ z: UnsafeMutablePointer<Self>, _ ldz: Int, _ work: UnsafeMutablePointer<Self>, _ lwork: Int,
-                    _ iwork: UnsafeMutablePointer<Int32>, _ liwork: Int) -> Int32
   static func ormtr(_ n: Int, _ m: Int, _ a: UnsafePointer<Self>, _ lda: Int, _ tau: UnsafePointer<Self>,
                     _ z: UnsafeMutablePointer<Self>, _ ldz: Int, _ work: UnsafeMutablePointer<Self>,
                     _ lwork: Int) -> Int32
@@ -58,13 +61,6 @@ protocol EigenScalar: BandReductionScalar {
 }
 
 extension Double: EigenScalar {
-  static func stedc(_ n: Int, _ d: UnsafeMutablePointer<Double>, _ e: UnsafeMutablePointer<Double>,
-                    _ z: UnsafeMutablePointer<Double>, _ ldz: Int, _ work: UnsafeMutablePointer<Double>, _ lwork: Int,
-                    _ iwork: UnsafeMutablePointer<Int32>, _ liwork: Int) -> Int32 {
-    var nn = Int32(n), ldz = Int32(ldz), lw = Int32(lwork), liw = Int32(liwork), info: Int32 = 0
-    dstedc_("I", &nn, d, e, z, &ldz, work, &lw, iwork, &liw, &info)
-    return info
-  }
   static func ormtr(_ n: Int, _ m: Int, _ a: UnsafePointer<Double>, _ lda: Int, _ tau: UnsafePointer<Double>,
                     _ z: UnsafeMutablePointer<Double>, _ ldz: Int, _ work: UnsafeMutablePointer<Double>,
                     _ lwork: Int) -> Int32 {
@@ -82,13 +78,6 @@ extension Double: EigenScalar {
 }
 
 extension Float: EigenScalar {
-  static func stedc(_ n: Int, _ d: UnsafeMutablePointer<Float>, _ e: UnsafeMutablePointer<Float>,
-                    _ z: UnsafeMutablePointer<Float>, _ ldz: Int, _ work: UnsafeMutablePointer<Float>, _ lwork: Int,
-                    _ iwork: UnsafeMutablePointer<Int32>, _ liwork: Int) -> Int32 {
-    var nn = Int32(n), ldz = Int32(ldz), lw = Int32(lwork), liw = Int32(liwork), info: Int32 = 0
-    sstedc_("I", &nn, d, e, z, &ldz, work, &lw, iwork, &liw, &info)
-    return info
-  }
   static func ormtr(_ n: Int, _ m: Int, _ a: UnsafePointer<Float>, _ lda: Int, _ tau: UnsafePointer<Float>,
                     _ z: UnsafeMutablePointer<Float>, _ ldz: Int, _ work: UnsafeMutablePointer<Float>,
                     _ lwork: Int) -> Int32 {
@@ -113,8 +102,11 @@ var blockedBulges = true
 var sbrConfigs: [[Int]] = []
 var windowed = true
 var fastTail = false
+var sbrOptions = ""
+var sbrGeneral = false
 var procs = 0
 var jobs = 20
+var optionSets: [String] = []
 var workerVariant: Int? = nil
 var workerStart = 0.0
 var files: [String] = []
@@ -131,7 +123,10 @@ while argi < args.count {
     sbrConfigs = args[argi + 1].split(separator: ",").map { $0.split(separator: "-").map { Int($0)! } }; argi += 2
   case "--whole": windowed = false; argi += 1
   case "--fast-tail": fastTail = true; argi += 1
+  case "--sbr-opts": sbrOptions = args[argi + 1]; argi += 2
+  case "--sbr-general": sbrGeneral = true; argi += 1
   case "--procs": procs = Int(args[argi + 1])!; argi += 2
+  case "--opts": optionSets = args[argi + 1].split(separator: ";").map(String.init); argi += 2
   case "--jobs": jobs = Int(args[argi + 1])!; argi += 2
   case "--worker": workerVariant = Int(args[argi + 1])!; workerStart = Double(args[argi + 2])!; argi += 3
   default: files.append(args[argi]); argi += 1
@@ -164,6 +159,29 @@ func readMatrix(_ path: String) -> (Int, UnsafeMutablePointer<Double>) {
   dtrmm_("L", "U", "T", "N", &nn, &nn, &one, S, &nn, H, &nn)
   S.deallocate()
   return (n, H)
+}
+
+/// SBROptions from a code string: t trailing block only, c combined update, l lower triangle, s symmetric chase,
+/// p parallelogram back-transformation, kN column blocks of N.
+func parseOptions(_ set: String) -> SBROptions {
+  var o = SBROptions()
+  var rest = Substring(set)
+  while let ch = rest.first {
+    rest = rest.dropFirst()
+    switch ch {
+    case "t": o.trailingOnly = true
+    case "c": o.combinedUpdate = true
+    case "l": o.lowerTriangle = true
+    case "s": o.symmetricChase = true
+    case "p": o.parallelogram = true
+    case "k":
+      let digits = rest.prefix { $0.isNumber }
+      o.columnBlock = Int(digits)!
+      rest = rest.dropFirst(digits.count)
+    default: fatalError("unknown option \(ch) in \(set)")
+    }
+  }
+  return o
 }
 
 /// One eigensolver variant: run() fills w (eigenvalues) and the first m columns of Z, recording stage times (s).
@@ -209,7 +227,7 @@ func benchmark<Real: EigenScalar>(_ path: String, _: Real.Type) {
   let tau: UnsafeMutablePointer<Real> = buffer(n)
   let bmax = bandwidths.max() ?? 1
   let lwork = max(1 + 4 * n + n * n, 64 * n, bandReductionWorkspace(n, bmax), bulgeBackTransformWorkspace(bmax, n),
-                  64 * n + 100_000, 1 + 6 * n + 2 * n * n)
+                  bulgeBlocksWorkspace(bmax, n), 64 * n + 100_000, 1 + 6 * n + 2 * n * n)
   let work: UnsafeMutablePointer<Real> = buffer(lwork)
   let liwork = 3 + 5 * n
   let iwork = UnsafeMutablePointer<Int32>.allocate(capacity: liwork)
@@ -217,7 +235,7 @@ func benchmark<Real: EigenScalar>(_ path: String, _: Real.Type) {
   let v2: UnsafeMutablePointer<Real> = buffer(n * n)
 
   func stedc() {
-    let info = Real.stedc(n, w, e, Z, n, work, 1 + 4 * n + n * n, iwork, liwork)
+    let info = divideAndConquer(n, w, e, Z, n, work, divideAndConquerWorkspace(n).0, iwork, liwork)
     if info != 0 { fatalError("stedc info \(info)") }
   }
   func ormtr() {
@@ -254,17 +272,60 @@ func benchmark<Real: EigenScalar>(_ path: String, _: Real.Type) {
         timed(&t) { backTransformBand(n, b, v1, t1, Z, n, m, work) }
       }))
   }
+  for set in optionSets {
+    let o = parseOptions(set)
+    for b in bandwidths where b < n - 1 {
+      var blocks = BulgeBlocks<Real>(b: b)
+      variants.append(Variant(
+        name: "2s[\(set)] b=\(b)", stages: ["band", "bulge", "stedc", "prep", "bt"],
+        run: { t in
+          A.update(from: Hr, count: n * n)
+          timed(&t) { reduceToBand(n, b, A, n, v1, t1, work, o) }
+          timed(&t) { chaseBulges(n, b, A, n, v2, w, e, work, o) }
+          timed(&t) { stedc() }
+          if o.parallelogram || o.columnBlock > 0 {
+            timed(&t) { blocks = prepareBulgeBlocks(n, b, v2) }
+            timed(&t) { backTransformTwoStage(n, b, blocks, v1, t1, Z, n, m, o, work) }
+          } else {
+            // Blocks built just before use (in cache): faster than precomputing them for one thread.
+            t.append(0)
+            timed(&t) {
+              backTransformBulgesBlocked(n, b, v2, Z, n, m, work)
+              backTransformBand(n, b, v1, t1, Z, n, m, work)
+            }
+          }
+        }))
+    }
+  }
   var leftovers = Array(repeating: "", count: variants.count + sbrConfigs.count)
   for config in sbrConfigs {
-    // Bandwidths that don't fit this n are dropped (as successiveBandReduction does).
+    // Bandwidths that don't fit this n are dropped (as SBRWorkspace does).
     var chain = [n - 1]
     for b in config + [1] where b < chain.last! && (b == 1 || b < n - 1) { chain.append(b) }
-    guard chain.count >= 2, n >= 2 else { continue }
+    guard n >= 2, chain.count >= (sbrGeneral ? 2 : 3) else { continue }
     let names = (1..<chain.count).map { "\(chain[$0 - 1] == n - 1 ? "n" : String(chain[$0 - 1]))>\(chain[$0])" }
+    let label = "SBR" + (sbrGeneral ? "gen " : sbrOptions.isEmpty ? " " : "[\(sbrOptions)] ")
+      + chain.dropFirst().dropLast().map(String.init).joined(separator: "-")
     let vi = variants.count
+    if !sbrGeneral {
+      let ws = SBRWorkspace<Real>(n: n, bandwidths: config, options: parseOptions(sbrOptions), vectors: m)
+      variants.append(Variant(
+        name: label, stages: names + ["stedc"] + names.reversed().map { "bt" + $0 },
+        run: { t in
+          A.update(from: Hr, count: n * n)
+          var laps: [Double] = [], mark = now()
+          let lap: (Int) -> Void = { _ in let x = now(); laps.append(x - mark); mark = x }
+          sbrReduce(ws, A, n, w, e, stageTime: lap)
+          t += laps; laps = []
+          timed(&t) { stedc() }
+          mark = now()
+          sbrBackTransform(ws, Z, n, m, stageTime: lap)
+          t += laps
+        }))
+      continue
+    }
     variants.append(Variant(
-      name: "SBR " + chain.dropFirst().dropLast().map(String.init).joined(separator: "-"),
-      stages: names + ["stedc"] + names.reversed().map { "bt" + $0 },
+      name: label, stages: names + ["stedc"] + names.reversed().map { "bt" + $0 },
       run: { t in
         A.update(from: Hr, count: n * n)
         var stages: [BandReductionStage<Real>] = []
@@ -378,7 +439,7 @@ func benchmark<Real: EigenScalar>(_ path: String, _: Real.Type) {
   for (k, v) in variants.enumerated() {
     let per = (0..<v.stages.count).map { s in times[k].map { $0[s] }.sorted()[reps / 2] }
     let total = times[k].map { $0.reduce(0, +) }.sorted()[reps / 2]
-    var line = "  " + v.name.padding(toLength: 14, withPad: " ", startingAt: 0)
+    var line = "  " + v.name.padding(toLength: max(14, v.name.count), withPad: " ", startingAt: 0)
     line += String(format: " total %8.2f ms (%.2fx unsym) |", 1e3 * total, total / base)
     for (s, name) in v.stages.enumerated() { line += " \(name) " + String(format: "%.2f", 1e3 * per[s]) }
     print(line)

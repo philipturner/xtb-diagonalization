@@ -1,152 +1,22 @@
-// Successive band reduction (SBR): a symmetric matrix is reduced to tridiagonal form through a list of bandwidths,
-// n - 1 -> b1 -> b2 -> ... -> 1, each stage by the same routine (reduceBandwidth). 1-stage is the empty list, 2-stage
-// [b], 3-stage [b1, b2]. Correctness first (BRIEF.md Phase 4): full n x n storage, no symmetry, every step a QR of a
-// small block (geqrf) applied to both sides as a block reflector (larft + larfb), all reflectors kept as compact WY
-// blocks and replayed in reverse for the eigenvectors. TwoStage.swift is the faster special case for 2-stage.
-//
-// One stage, b_in -> b_out with panel width p (1 <= p <= b_out < b_in), lower band |i - j| <= b, mirrored above
-// (Bischof, Lang and Sun's band reduction):
-//   sweep j (j = 0, p, 2p, ...): columns j ..< j + p have nonzeros below their b_out band, rows j + b_out ..< j + p + b_in.
-//   step 0  QR of A[j + b_out ..< j + b_out + h, j ..< j + p], h = p + b_in - b_out: R keeps bandwidth b_out for these
-//           columns. Applying Q from the right mixes columns j + b_out ..< j + b_out + h, which fills rows below them
-//           beyond the b_in band: a bulge.
-//   step k  QR of A[rs ..< rs + h, cs ..< cs + p] with cs = the previous step's first row, rs = cs + b_in: the bulge's
-//           first p columns go back to bandwidth b_in. The rest of the bulge belongs to the next sweep's columns.
-// The QR is one-sided because p <= b_out <= the distance from the panel to its first row. Dense -> band is b_in = n - 1
-// (one step per sweep); the classical bulge chase is b_out = p = 1.
-//
-// Indices are 0-based, matrices column-major.
+// Successive band reduction (SBR), the driver: a symmetric matrix -> tridiagonal form through a chain of bandwidths
+// n - 1 -> b1 -> ... -> 1, each stage by its own routine (one file per step of the decomposition):
+//   BandForm.swift                       dense -> b1
+//   BandToBand.swift                     b_i -> b_{i+1}, the middle stages of 3 or more
+//   BulgeChasing.swift                   b_last -> 1
+//   DivideAndConquer.swift               the tridiagonal eigenproblem
+//   BulgeBackTransformation.swift        eigenvectors back through the bulge chase
+//   BandToBandBackTransformation.swift   ... through the middle stages
+//   BandFormBackTransformation.swift     ... through the first stage
+// with the compact WY transforms in WYTransform.swift and the runtime switches in SBROptions.swift. 2-stage is the chain
+// [b], at no cost over a dedicated 2-stage driver; 3-stage [b1, b2]. 1-stage reduction is Tridiagonalization.swift.
+// sbrReduceGeneral is a test reference: every stage by BandToBand.swift's general routine, any chain including [].
 
-/// One step's block reflector Q = I - V T V^T, acting on rows rowStart ..< rowStart + height.
-public struct BandReductionStep {
-  public var rowStart: Int
-  public var height: Int
-  /// Number of Householder vectors (columns of V)
-  public var count: Int
-  /// Offsets of V (height x count, leading dimension height, geqrf layout) and T (count x count) in the stage's storage
-  public var vOffset: Int
-  public var tOffset: Int
-}
-
-/// The reflectors of one stage, in the order they were applied.
-public struct BandReductionStage<Real: BandReductionScalar> {
-  public var bandIn: Int
-  public var bandOut: Int
-  public var panel: Int
-  public var steps: [BandReductionStep] = []
-  public var v: [Real] = []
-  public var t: [Real] = []
-  /// Largest |A(i, j)| outside the b_out band before it was cleared (should be rounding-level)
-  public var leftover: Real = 0
-}
-
-/// Reduces the symmetric matrix a (n x n, full storage) from bandwidth bandIn to bandOut, in place, with panel width
-/// panel (1 ... bandOut). Entries outside the new band are set to zero (their largest magnitude is reported as
-/// leftover). windowed = false applies every step to the whole matrix (slow; a cross-check of the window).
-@_specialize(exported: true, where Real == Double)
-@_specialize(exported: true, where Real == Float)
-public func reduceBandwidth<Real: BandReductionScalar>(
-  _ n: Int, _ a: UnsafeMutablePointer<Real>, _ lda: Int, bandIn: Int, bandOut: Int, panel: Int,
-  windowed: Bool = true
-) -> BandReductionStage<Real> {
-  precondition(bandOut >= 1 && bandOut < bandIn && panel >= 1 && panel <= bandOut, "invalid band reduction")
-  var stage = BandReductionStage<Real>(bandIn: bandIn, bandOut: bandOut, panel: panel)
-  let h = panel + bandIn - bandOut
-  var block = [Real](repeating: 0, count: h * panel)
-  var tau = [Real](repeating: 0, count: panel)
-  var tBlock = [Real](repeating: 0, count: panel * panel)
-  var work = [Real](repeating: 0, count: max(64 * panel, n * panel))
-
-  for j in stride(from: 0, to: max(0, n - bandOut - 1), by: panel) {
-    var cs = j, rs = j + bandOut
-    while rs < n - 1 {
-      let height = min(h, n - rs)
-      let width = min(panel, n - cs)
-      let count = min(height, width)
-      // QR of the block A[rs ..< rs + height, cs ..< cs + width].
-      for c in 0..<width {
-        for i in 0..<height { block[i + c * height] = a[(rs + i) + (cs + c) * lda] }
-      }
-      block.withUnsafeMutableBufferPointer { v in
-        tau.withUnsafeMutableBufferPointer { tp in
-          work.withUnsafeMutableBufferPointer { wp in
-            tBlock.withUnsafeMutableBufferPointer { t in
-              Real.geqrf(height, width, v.baseAddress!, height, tp.baseAddress!, wp.baseAddress!, wp.count)
-              Real.larft(height, count, v.baseAddress!, height, tp.baseAddress!, t.baseAddress!, panel)
-            }
-          }
-        }
-      }
-      // The window holding every nonzero of rows and columns rs ..< rs + height (generous: bulges reach about
-      // 2 b_in + h beyond the block).
-      let margin = 2 * (bandIn + h)
-      let lo = windowed ? max(0, rs - margin) : 0
-      let hi = windowed ? min(n, rs + height + margin) : n
-      block.withUnsafeBufferPointer { v in
-        tBlock.withUnsafeBufferPointer { t in
-          work.withUnsafeMutableBufferPointer { wp in
-            // A = Q^T A Q on the window.
-            Real.larfb("L", "T", height, hi - lo, count, v.baseAddress!, height, t.baseAddress!, panel,
-                       a + rs + lo * lda, lda, wp.baseAddress!, hi - lo)
-            Real.larfb("R", "N", hi - lo, height, count, v.baseAddress!, height, t.baseAddress!, panel,
-                       a + lo + rs * lda, lda, wp.baseAddress!, hi - lo)
-          }
-        }
-      }
-      // Exact zeros below R in the annihilated columns, both triangles.
-      for c in 0..<width {
-        for i in (c + 1)..<max(height, c + 1) {
-          a[(rs + i) + (cs + c) * lda] = 0
-          a[(cs + c) + (rs + i) * lda] = 0
-        }
-      }
-      // Keep V and T for the back-transformation.
-      let vOffset = stage.v.count, tOffset = stage.t.count
-      stage.v.append(contentsOf: block[0..<(height * count)])
-      for c in 0..<count {
-        for r in 0..<count { stage.t.append(tBlock[r + c * panel]) }
-      }
-      stage.steps.append(BandReductionStep(
-        rowStart: rs, height: height, count: count, vOffset: vOffset, tOffset: tOffset))
-      // Next step: the bulge's first columns.
-      cs = rs
-      rs += bandIn
-    }
-  }
-  for j in 0..<n {
-    for i in 0..<n where abs(i - j) > bandOut {
-      stage.leftover = max(stage.leftover, abs(a[i + j * lda]))
-      a[i + j * lda] = 0
-    }
-  }
-  return stage
-}
-
-/// z = Q z for the first m columns of z (n x m, ldz), Q = Q_1 Q_2 ... the stage's steps in application order.
-@_specialize(exported: true, where Real == Double)
-@_specialize(exported: true, where Real == Float)
-public func backTransform<Real: BandReductionScalar>(
-  _ stage: BandReductionStage<Real>, _ z: UnsafeMutablePointer<Real>, _ ldz: Int, _ m: Int
-) {
-  var work = [Real](repeating: 0, count: max(1, m * stage.panel))
-  stage.v.withUnsafeBufferPointer { v in
-    stage.t.withUnsafeBufferPointer { t in
-      work.withUnsafeMutableBufferPointer { wp in
-        for step in stage.steps.reversed() {
-          Real.larfb("L", "N", step.height, m, step.count, v.baseAddress! + step.vOffset, step.height,
-                     t.baseAddress! + step.tOffset, step.count, z + step.rowStart, ldz, wp.baseAddress!, max(m, 1))
-        }
-      }
-    }
-  }
-}
-
-/// Successive band reduction of the symmetric matrix a (n x n, full storage) to tridiagonal form through the given
-/// bandwidths (decreasing, each < n - 1 and > 1; [] reduces directly). Panel widths default to each stage's b_out.
+/// Test reference: successive band reduction of the symmetric matrix a (n x n, full storage) to tridiagonal form, every
+/// stage by BandToBand.swift's general routine, through the given bandwidths (decreasing, each < n - 1 and > 1; [] reduces directly). Panel widths default to each stage's b_out.
 /// Writes the diagonal to d (n) and subdiagonal to e (n - 1); returns the stages in order, for backTransform.
 @_specialize(exported: true, where Real == Double)
 @_specialize(exported: true, where Real == Float)
-public func successiveBandReduction<Real: BandReductionScalar>(
+public func sbrReduceGeneral<Real: BandReductionScalar>(
   _ n: Int, _ a: UnsafeMutablePointer<Real>, _ lda: Int, bandwidths: [Int], panels: [Int]? = nil,
   _ d: UnsafeMutablePointer<Real>, _ e: UnsafeMutablePointer<Real>, windowed: Bool = true
 ) -> [BandReductionStage<Real>] {
@@ -159,4 +29,113 @@ public func successiveBandReduction<Real: BandReductionScalar>(
   for i in 0..<n { d[i] = a[i + i * lda] }
   for i in 0..<max(0, n - 1) { e[i] = a[(i + 1) + i * lda] }
   return stages
+}
+
+/// Buffers for one SBR configuration on n x n matrices, allocated once (page-aligned) and reused across solves.
+public final class SBRWorkspace<Real: BandReductionScalar> {
+  public let n: Int
+  /// n - 1, the intermediate bandwidths that fit n (decreasing), 1
+  public let chain: [Int]
+  public var options: SBROptions
+  // First stage (dense -> chain[1], when chain[1] > 1): Householder vectors and T factors (reduceToBand layout).
+  let v1: UnsafeMutablePointer<Real>, t1: UnsafeMutablePointer<Real>
+  // Last stage (chain[count - 2] -> 1, when > 1): bulge reflectors (chaseBulges layout).
+  let v2: UnsafeMutablePointer<Real>
+  let work: UnsafeMutablePointer<Real>
+  let workCount: Int
+  // Middle stages, filled by reduce.
+  var middle: [BandReductionStage<Real>] = []
+
+  public init(n: Int, bandwidths: [Int], options: SBROptions = SBROptions(), vectors: Int? = nil) {
+    var chain = [n - 1]
+    for b in bandwidths + [1] where b < chain.last! && (b == 1 || b < n - 1) { chain.append(b) }
+    self.n = n
+    self.chain = chain
+    self.options = options
+    let b1 = chain.count > 2 ? chain[1] : 1, bt = chain.count > 2 ? chain[chain.count - 2] : 1
+    let m = vectors ?? n
+    workCount = max(bandReductionWorkspace(n, b1), bulgeChasingWorkspace(bt), bulgeBackTransformWorkspace(bt, m), 1)
+    func alloc(_ count: Int) -> UnsafeMutablePointer<Real> {
+      let p = UnsafeMutableRawPointer.allocate(byteCount: max(count, 1) * MemoryLayout<Real>.stride, alignment: 16384)
+        .bindMemory(to: Real.self, capacity: max(count, 1))
+      p.initialize(repeating: 0, count: max(count, 1))
+      return p
+    }
+    v1 = alloc(chain.count > 2 ? n * n : 1)
+    t1 = alloc(chain.count > 2 ? b1 * n : 1)
+    v2 = alloc(chain.count > 2 ? n * n : 1)
+    work = alloc(workCount)
+  }
+
+  deinit {
+    v1.deallocate(); t1.deallocate(); v2.deallocate(); work.deallocate()
+  }
+
+  /// Names of the reduction stages, e.g. ["n>64", "64>16", "16>1"].
+  public var stageNames: [String] {
+    (1..<chain.count).map { "\(chain[$0 - 1] == n - 1 ? "n" : String(chain[$0 - 1]))>\(chain[$0])" }
+  }
+}
+
+/// Successive band reduction of the symmetric matrix a (n x n, full storage) to tridiagonal form along
+/// workspace.chain, each stage by its fastest routine: the first (dense -> b1) by reduceToBand, the last (b -> 1) by
+/// chaseBulges, any in between by reduceBandwidth; the SBROptions apply to the first and last. 2-stage is the
+/// chain [b], at no extra cost. Writes the diagonal to d and the subdiagonal to e. stageTime (optional) receives each
+/// stage's seconds.
+@_specialize(exported: true, where Real == Double)
+@_specialize(exported: true, where Real == Float)
+public func sbrReduce<Real: BandReductionScalar>(
+  _ ws: SBRWorkspace<Real>, _ a: UnsafeMutablePointer<Real>, _ lda: Int, _ d: UnsafeMutablePointer<Real>,
+  _ e: UnsafeMutablePointer<Real>, stageTime: ((Int) -> Void)? = nil
+) {
+  let n = ws.n, chain = ws.chain
+  precondition(chain.count > 2, "SBR needs an intermediate bandwidth (1-stage is Tridiagonalization.swift)")
+  ws.middle = []
+  // The first stage may skip the upper triangle only when the next stage is the symmetric bulge chase.
+  var first = ws.options
+  if chain.count > 3 { first.symmetricChase = false; first.lowerTriangle = false }
+  reduceToBand(n, chain[1], a, lda, ws.v1, ws.t1, ws.work, first)
+  stageTime?(0)
+  for s in 2..<(chain.count - 1) {
+    ws.middle.append(reduceBandwidth(n, a, lda, bandIn: chain[s - 1], bandOut: chain[s], panel: chain[s]))
+    stageTime?(s - 1)
+  }
+  chaseBulges(n, chain[chain.count - 2], a, lda, ws.v2, d, e, ws.work, ws.options)
+  stageTime?(chain.count - 2)
+}
+
+/// z = Q z for the first m columns of z (n x m, ldz), Q the product of every stage of the last sbrReduce, applied in
+/// reverse stage order. stageTime (optional) receives each back-transformation's index in stage order.
+@_specialize(exported: true, where Real == Double)
+@_specialize(exported: true, where Real == Float)
+public func sbrBackTransform<Real: BandReductionScalar>(
+  _ ws: SBRWorkspace<Real>, _ z: UnsafeMutablePointer<Real>, _ ldz: Int, _ m: Int, stageTime: ((Int) -> Void)? = nil
+) {
+  let n = ws.n, chain = ws.chain
+  precondition(chain.count > 2, "SBR needs an intermediate bandwidth")
+  backTransformBulgesBlocked(n, chain[chain.count - 2], ws.v2, z, ldz, m, ws.work)
+  stageTime?(chain.count - 2)
+  for s in stride(from: chain.count - 2, through: 2, by: -1) {
+    backTransform(ws.middle[s - 2], z, ldz, m)
+    stageTime?(s - 1)
+  }
+  backTransformBand(n, chain[1], ws.v1, ws.t1, z, ldz, m, ws.work)
+  stageTime?(0)
+}
+
+/// Both back-transformations of the 2-stage path with the precomputed bulge blocks: z = Q1 Q2 z for the first m
+/// columns, in blocks of options.columnBlock columns (both stages per block while it is in cache). work holds
+/// max(bulgeBlocksWorkspace(b, block), bandReductionWorkspace(n, b)).
+@_specialize(exported: true, where Real == Double)
+@_specialize(exported: true, where Real == Float)
+public func backTransformTwoStage<Real: BandReductionScalar>(
+  _ n: Int, _ b: Int, _ blocks: BulgeBlocks<Real>, _ v1: UnsafePointer<Real>, _ t1: UnsafePointer<Real>,
+  _ z: UnsafeMutablePointer<Real>, _ ldz: Int, _ m: Int, _ options: SBROptions, _ work: UnsafeMutablePointer<Real>
+) {
+  let block = options.columnBlock > 0 ? options.columnBlock : m
+  for c0 in stride(from: 0, to: m, by: block) {
+    let width = min(block, m - c0)
+    applyBulgeBlocks(blocks, z + c0 * ldz, ldz, width, parallelogram: options.parallelogram, work)
+    backTransformBand(n, b, v1, t1, z + c0 * ldz, ldz, width, work)
+  }
 }
