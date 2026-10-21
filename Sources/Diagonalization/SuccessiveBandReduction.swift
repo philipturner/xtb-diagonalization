@@ -54,7 +54,7 @@ public final class SBRWorkspace<Real: BandReductionScalar> {
     self.options = options
     let b1 = chain.count > 2 ? chain[1] : 1, bt = chain.count > 2 ? chain[chain.count - 2] : 1
     let m = vectors ?? n
-    workCount = max(bandReductionWorkspace(n, b1), bulgeChasingWorkspace(bt), bulgeBackTransformWorkspace(bt, m), 1)
+    workCount = max(bandReductionWorkspace(n, b1), bulgeChasingWorkspace(bt, n), bulgeBackTransformWorkspace(bt, m), 1)
     func alloc(_ count: Int) -> UnsafeMutablePointer<Real> {
       let p = UnsafeMutableRawPointer.allocate(byteCount: max(count, 1) * MemoryLayout<Real>.stride, alignment: 16384)
         .bindMemory(to: Real.self, capacity: max(count, 1))

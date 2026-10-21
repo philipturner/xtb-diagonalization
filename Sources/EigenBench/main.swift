@@ -19,8 +19,9 @@
 // --opts "t;tcl;tclsp;tclspk128": extra 2-stage variants with SBROptions, one per set, named 2s[set]: t trailing
 // block only, c combined (sy2sb) update, l lower triangle, s symmetric chase, p parallelogram back-transformation,
 // kN column blocks of N, g compact WY blocks by three gemm calls instead of larfb, vN bulge back-transformation blocks
-// of N sweeps (default b). With p or k the bulge blocks are precomputed (stage "prep"); otherwise each is built just
-// before it's applied (backTransformBulgesBlocked), which is faster for one thread.
+// of N sweeps (default b), b band storage and x vector kernels for the symmetric chase. With p or k the bulge blocks
+// are precomputed (stage "prep"); otherwise each is built just before it's applied (backTransformBulgesBlocked),
+// which is faster for one thread.
 // --procs P [--jobs K]: throughput instead of latency. For each variant, P copies of this program (one file only)
 // start together and each runs the variant K times (default 20) after a warm-up; reports jobs per second as a work
 // queue sees it (sum over processes of K / elapsed) and the median job time. Run with VECLIB_MAXIMUM_THREADS=1.
@@ -163,7 +164,8 @@ func readMatrix(_ path: String) -> (Int, UnsafeMutablePointer<Double>) {
 }
 
 /// SBROptions from a code string: t trailing block only, c combined update, l lower triangle, s symmetric chase,
-/// p parallelogram back-transformation, kN column blocks of N, g gemm WY apply, vN bulge blocks of N sweeps.
+/// p parallelogram back-transformation, kN column blocks of N, g gemm WY apply, vN bulge blocks of N sweeps, b band
+/// storage for the symmetric chase, x vector kernels in the symmetric chase.
 func parseOptions(_ set: String) -> SBROptions {
   var o = SBROptions()
   var rest = Substring(set)
@@ -176,6 +178,8 @@ func parseOptions(_ set: String) -> SBROptions {
     case "s": o.symmetricChase = true
     case "p": o.parallelogram = true
     case "g": o.gemmWY = true
+    case "b": o.compactBand = true
+    case "x": o.vectorChase = true
     case "v":
       let digits = rest.prefix { $0.isNumber }
       o.bulgeGroup = Int(digits)!

@@ -281,3 +281,28 @@
   Code: the stage files moved to `Sources/Diagonalization/Stages/` (found moved in the working tree at session start;
   committed with this step). Next: per-precision defaults (gemmWY on for FP32; FP64 on for latency, off for 8 × 1 at
   n ≥ 776), then the bulge chase (now the largest FP64 stage after the back-transformation) and occupied-only vectors.
+- **Bulge chase, occupied-only vectors, recommended configuration** (2026-10-21, continued).
+  Band storage for the symmetric chase (`compactBand`, `b`): the lower band copied to leading dimension 2b (no two
+  elements within 2b of the diagonal alias; the chase's fill reaches 2b − 1), same code, bit-identical results
+  (48/48 random runs). No speed-up (`build/compactband-latency.txt`, within ±2% except two outliers): the chase isn't
+  memory-bound. It runs at ~6 GF/s (n = 1204, b = 48: ~0.3 GFLOP in 43–50 ms), ~10% of one core's FP64 NEON peak.
+  Explicit vector FMA kernels for every chase loop (`vectorChase`, `x`; new `VectorKernels.swift`: dot, axpy, two-term
+  axpy, fused dot + axpy for the symmetric block): chase 42.9 → 39.6 ms (n = 1204, b = 48, after `tcs`), 51.7 → 49.2
+  (after `tcls`); accuracy unchanged (random n = 3–131, 120 runs, FP64 ≤ 5.3e-14, FP32 ≤ 7.4e-6). The remaining cost
+  is probably per-call overhead of ~200 short loops per bulge (b-element columns); register-blocking 4 columns per
+  pass is the next try.
+  **Unexplained:** the chase right after the `l` (symm/syr2k) first stage is 15–30% slower than after `tcs` (n = 1204
+  b = 48 49–51 vs 40–43 ms; n = 1788 b = 64 124–142 vs 108 ms), cancelling `l`'s stage-1 saving (6 / 28 ms). It isn't
+  the data (zero/subnormal counts identical; chase on fresh copies of the `tcls` output runs at the fast speed after
+  the first call), and not the skipped final pass (keeping it doesn't help). The slow state sometimes persists for
+  several chase calls and is only partly cleared by 5–20 ms of compute without memory traffic: machine state after
+  AMX-heavy syr2k (cache writebacks or power state), not measurable without counters. Net: `l` is neutral at large n.
+  Occupied-only eigenvectors (`build/vectors-latency.txt`, best b, ms; 1-stage sym / SBR `tcsg`): FP64 m = n/2:
+  n = 412 8.49 / 12.38, 619 22.75 / 32.21, 776 38.71 / 51.12, 1204 118.0 / 152.0 (1.29–1.46×; all vectors
+  1.45–1.58×); m = n/4 1.20–1.40×. FP32 m = n/2 1.36–1.53×, m = n/4 1.27–1.55×. 1-stage gains less (its ormtr is a
+  small share; stedc forms all tridiagonal vectors in both). Single-thread SBR's reduction alone (stage 1 + chase,
+  n = 1204: ~76 ms) is already about 1-stage's whole tridiagonalization (~71 ms), so a single-thread win needs a much
+  faster chase; its case remains 8 × 1 throughput at large n.
+  `SBROptions.recommended(n:fp32:manyProcesses:)`: t c s x, gemmWY for FP32 always and for FP64 alone or n < 700,
+  b = 32 / 48 / 64 below 700 / 1500 / above. Regression through the driver: random n = 3–131, FP64 ≤ 4.6e-14, FP32
+  ≤ 6.5e-6.

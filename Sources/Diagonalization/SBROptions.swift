@@ -13,6 +13,11 @@ public struct SBROptions {
   /// Stage 2 on the lower triangle: per bulge a symmetric rank-2 update of the reflector's block and rank-1 updates of
   /// the rows and columns around it, column-contiguous loops; about half the arithmetic and memory traffic.
   public var symmetricChase = false
+  /// With symmetricChase: the chase runs on a copy of the lower band in band storage (leading dimension 2b) instead of
+  /// in the n x n matrix: same arithmetic, (2b + 1) n elements in place of columns 8n bytes apart.
+  public var compactBand = false
+  /// With symmetricChase: every loop of the chase by explicit vector fused multiply-adds (VectorKernels.swift).
+  public var vectorChase = false
   /// Bulge back-transformation with triangular products at both ends of each parallelogram block (larfb treats the
   /// lower (b - 1) x b part as dense, though half of it is zero). Uses the precomputed blocks (prepareBulgeBlocks).
   public var parallelogram = false
@@ -31,7 +36,21 @@ public struct SBROptions {
   public static var all: SBROptions {
     var o = SBROptions()
     o.trailingOnly = true; o.combinedUpdate = true; o.lowerTriangle = true; o.symmetricChase = true
+    o.compactBand = true; o.vectorChase = true
     o.parallelogram = true; o.gemmWY = true
     return o
+  }
+
+  /// The measured best 2-stage configuration (LOG.md, 2026-10-21; M1 Max, GFN2 matrices n = 412-1788): options and
+  /// the intermediate bandwidth b, for one process per core (manyProcesses, as 8 x 1 throughput) or one process alone.
+  /// FP32 takes the gemm WY apply everywhere; FP64 only alone or below n = 700, since with 8 processes larfb wins at
+  /// n >= 776 (AMX contention). The lower-triangle first stage is left off: at n = 1204-1788 it saves 6-28 ms in
+  /// stage 1 and the bulge chase right after it runs as much slower (unexplained; not the data, LOG.md).
+  public static func recommended(n: Int, fp32: Bool, manyProcesses: Bool) -> (options: SBROptions, bandwidth: Int) {
+    var o = SBROptions()
+    o.trailingOnly = true; o.combinedUpdate = true; o.symmetricChase = true; o.vectorChase = true
+    o.gemmWY = fp32 || !manyProcesses || n < 700
+    let b = n < 700 ? 32 : n < 1500 ? 48 : 64
+    return (o, b)
   }
 }
