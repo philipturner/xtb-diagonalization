@@ -5,21 +5,28 @@ All times: M1 Max, Accelerate, 1 thread, median of 5 cold single points, 300 K, 
 
 ## Headline
 
-`diagonalization` (fork commit `6c6fd43`) is **1.21–1.70x faster** than production (upstream main) and passes every
-gate on all 174 runs. With opt-in FP32 early cycles (`XTB_SCC_FP32_RMSQ=1e-3`) it is **1.52–2.0x** faster, but fails
-the gates on five 100 K runs.
+`diagonalization` (fork commit `6c6fd43`) is **1.30–1.63x faster** than the production library per single point and
+passes every gate on all 174 runs. With opt-in FP32 early cycles (`XTB_SCC_FP32_RMSQ=1e-3`) it is **1.55–1.92x**
+faster, but fails the gates on five 100 K runs. Final timing: three round-robin rounds of median-of-5, spread ≤ 3.6%.
 
-| Case (n) | production code | `diagonalization` | + FP32 early cycles (opt-in) |
+| Case (n) | production library | `diagonalization` | + FP32 early cycles (opt-in) |
 | --- | --- | --- | --- |
-| `t2_R` (124) | 0.046 s | 0.030 s (1.54x) | 0.026 s (1.77x) |
-| `facet_closed` (412) | 0.585 s | 0.409 s (1.43x) | 0.353 s (1.66x) |
-| `s12_C31` (419) | 1.579 s | 1.227 s (1.29x) | 1.014 s (1.56x) |
-| `facet_dbpair_tool` (448) | 1.062 s | 0.878 s (1.21x) | 0.699 s (1.52x) |
-| `s3_S42_159` (619) | 2.240 s | 1.630 s (1.37x) | 1.413 s (1.59x) |
-| `diamond233` (776) | 2.414 s | 1.421 s (1.70x) | 1.209 s (2.00x) |
+| `t2_R` (124) | 0.045 s | 0.029 s (1.56x) | 0.026 s (1.73x) |
+| `facet_closed` (412) | 0.573 s | 0.396 s (1.45x) | 0.352 s (1.63x) |
+| `s12_C31` (419) | 1.559 s | 1.192 s (1.31x) | 0.984 s (1.58x) |
+| `facet_dbpair_tool` (448) | 1.100 s | 0.843 s (1.30x) | 0.708 s (1.55x) |
+| `s3_S42_159` (619) | 2.218 s | 1.617 s (1.37x) | 1.399 s (1.59x) |
+| `diamond233` (776) | 2.316 s | 1.422 s (1.63x) | 1.206 s (1.92x) |
 
-The 2x goal at n ≈ 410–450 is not reached under the gates. What is left: the eigensolve is still 67–76% of a single
-point, and within it the tridiagonal reduction (`dsytrd`, BLAS2) is about half.
+**Throughput** (what production sees): `diagonalization` at 8 processes × 1 thread runs **1.61x** (n = 448: 4.29 → 6.91
+jobs/s) and **1.75x** (n = 655: 1.80 → 3.14 jobs/s) as many single points as the production library at production's
+6 × 2.
+
+**Drop-in:** the production Python wrapper (`xtb_lib.py`, unchanged, `LIB` pointed at the build) runs it and agrees
+with the production library to 1e-13 Eh and 7e-13 Eh/bohr on three production systems. Swift not checked.
+
+The 2x goal per single point at n ≈ 410–450 is not reached under the gates. What is left: the eigensolve is still
+62–76% of a single point, and within it the tridiagonal reduction (`dsytrd`, BLAS2) is about half.
 
 ## Phase 1
 
@@ -64,13 +71,20 @@ production library at the same accuracy), and production accuracy only checks sa
   stays at 1e-3–1e-2 Eh for most of the run.
 - **Option A, pseudodiag:** not useful. One occupied–virtual sweep is first-order only (density error ≥ 1e-4 late,
   up to 0.5 early) and costs nearly as much as `dsyevd` at these sizes.
-- **Option B, Ogita–Aishima refinement:** two steps with exact treatment of near-degenerate clusters reach 1e-9–1e-12
-  density error in the last ~10–25% of cycles, at about 40% of the exact cost, but diverge earlier. Estimated gain if
-  restricted to the tail: 5–19% per single point. Not yet implemented in xTB.
+- **Option B, Ogita–Aishima refinement:** offline, two steps with exact treatment of near-degenerate clusters reach
+  1e-9–1e-12 density error in the last ~10–25% of cycles, at about 40% of the exact cost, but diverge earlier.
+  Implemented opt-in on `diag/refine` (`f349b0e`, `XTB_SCC_REFINE_RMSQ`): up to three steps, accepted only if the
+  last correction is < 1e-5, else exact solve and back-off. **Passes every gate with SCC cycle counts unchanged**, but
+  the gain is small: 1–4% faster at n ≤ 448, 3–7% slower at n ≥ 619 (storing all eigenvectors and failed attempts
+  cost more than the refined cycles save). Not merged.
 - **Option C, FP32 early cycles:** implemented (opt-in). FP32 eigensolve is 30% cheaper; density error 1e-6–1e-4, no
   failures; single points 14–17% faster. Passes every gate at 300 K and 1000 K; at 100 K four slow `s12_C31` radicals
   need 15–16% more cycles (gate 10%) and `s12_C00` uhf 3 stops converging at accuracy 0.01. Even one FP32 cycle
   changes those trajectories; a later switch doesn't help. **Your call** whether 300 K-only use is acceptable.
+- **Cycle count (side experiment, `diag/broyden`):** Broyden damping 0.2–0.3 instead of xTB's 0.40 cuts SCC cycles on
+  the slow open-shell systems by 19–51% and over the grid by 13.6%, but moves `facet_bare_dimer` uhf 0 at 100 K to a
+  different SCF solution 3.0 mEh higher (gap 1.54 instead of 0.20 eV) and doubles another run's cycles. Not usable as
+  a global default; cycle count is the biggest remaining lever if a safer accelerator can be found.
 - **Fragile runs:** `facet_bare_dimer` uhf 0 (300 K) and `s12_C00` uhf 3 (100 K) fail to converge from some perturbed
   starts; the 100 K `s12_C31` radicals change their cycle count by up to 16% under any 1e-6 perturbation.
 
@@ -86,4 +100,6 @@ production library at the same accuracy), and production accuracy only checks sa
 
 1. Whether to accept FP32 early cycles for 300 K production use (it fails only 100 K gates).
 2. Whether to push `diagonalization` and open nothing upstream yet (the three PRs are g8j39's, still open).
-3. Whether to run production as 8 processes × 1 thread (+15–23% throughput, measured).
+3. Whether to run production as 8 processes × 1 thread: +15–23% throughput with the current library, and with
+   `diagonalization` 1.61–1.75x production's current throughput (measured).
+4. Whether to pursue a safer SCC accelerator (the damping experiment shows cycle count is the biggest lever left).

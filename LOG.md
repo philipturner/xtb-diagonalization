@@ -70,3 +70,10 @@
   `dsytrd_2stage` no faster at n ≤ 448, 17–20% at 619–776, no eigenvector support (`trd2stage.c`).
 - **Summary for the user:** `FINDINGS.md`.
 - **Note:** `scripts/kernels/twostage.c` came from a background agent this session did not start; not committed.
+- **Final timing** (round-robin ×3, `build/final/`): `diagonalization` 1.30–1.63x vs the production library, + FP32
+  1.55–1.92x. Throughput at 8 × 1 thread vs production's 6 × 2 with the current library: 1.61x (n = 448), 1.75x
+  (n = 655). Drop-in through production's `xtb_lib.py`: agrees to 1e-13 Eh.
+- **Refinement in xTB** (`diag/refine`, `f349b0e`): passes every gate with unchanged cycle counts, but only 1–4%
+  faster at n ≤ 448 and 3–7% slower at n ≥ 619; not merged.
+- **Broyden damping** (`diag/broyden`, `5684b47`): 0.25 cuts cycles 13.6% over the grid but changes one SCF solution
+  (`facet_bare_dimer` u0 100 K, +3.0 mEh) and slows others; not usable as a default.
