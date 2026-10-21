@@ -214,3 +214,21 @@
   code scales like the symmetric 1-stage and better than the unsymmetrized one (whose AMX-bound gemv/gemm contend,
   as in xTB with `XTB_SCC_TRD=full`); it isn't (yet) losing extra throughput at 8 × 1. 8-process jobs/s, 2-stage best
   / 1-stage sym: FP64 0.43 (448), 0.47 (776); FP32 0.39, 0.42.
+- **Large n** (user's new `sic_n588/1204/1788`; dumps `build/dumps/sic_*/hs_10.bin` from `diag/dump`, uhf 0, 300 K,
+  cycle 10). Accuracy: FP64 eigenvalues ≤ 8.2e-13 Eh, residual ≤ 1.9e-15, orthogonality ≤ 6.0e-15; FP32 eigenvalues
+  ≤ 2.4e-5 Eh (`ssyevd`: 4.3e-5 / 2.6e-4 / 5.4e-4), residual ≤ 9.5e-7; zero out-of-band leftovers in every SBR stage.
+  Latency, 1 process (`build/eigen-large-fp64.txt`, `-fp32.txt`, median of 3, all vectors), best variant / 1-stage
+  sym: FP64 n = 588: 2-stage b = 32 48.4 vs 22.2 ms (2.18×); 1204: b = 32 307.9 vs 134.9 (2.28×); 1788: b = 48 912 vs
+  446 (2.04×). FP32: 588 b = 48 31.6 vs 13.2; 1204 b = 48 163.2 vs 74.0 (2.21×); 1788 b = 64 462 vs 210 (2.20×). The
+  best b grows with n (32 → 48–64). The unsymmetrized 1-stage breaks down once the matrix leaves cache (n = 1788 FP64:
+  tridiagonal 449 vs 250 ms symmetric); the whole-matrix band reduction (b = 64: 189 ms) already beats the symmetric
+  1-stage reduction (250 ms) at n = 1788 despite its ~3× redundant work. 3-stage still loses everywhere (best: FP32
+  n = 1788 [256,64] 557 ms vs 2-stage b = 64 462 ms): its middle stage and back-transformation cost more than the
+  smaller tail band saves.
+  Throughput, 8 processes × 1 thread (`build/eigen-throughput-large.txt`; 8 / 4 jobs per process at n = 1204 / 1788,
+  short runs): scaling 1 → 8 processes, FP64 n = 1204 / 1788: 1-stage sym 3.4× / 2.6×, unsym 1.6× / 1.5×, 2-stage
+  b = 64 5.0× / 4.1×; FP32: sym 5.0× / 3.1×, unsym 3.5× / 1.6×, 2-stage b = 64 5.6× / 5.2×. The 1-stage BLAS2
+  reduction is memory-bandwidth-bound when 8 matrices of 12–26 MB stream at once; the 2-stage's BLAS3-heavy work isn't.
+  8-process jobs/s, 2-stage best / 1-stage sym: FP64 0.63 (1204), 0.78 (1788); FP32 0.47, 0.78 (single process:
+  0.43–0.49). With the deferred optimizations (trailing-block stage 1 alone removes ~2/3 of its work) 2-stage may pass
+  1-stage in 8 × 1 throughput around n ≈ 1800 first.
