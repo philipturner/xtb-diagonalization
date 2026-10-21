@@ -398,3 +398,12 @@
   (+29 M cycles, ~9 ms of the 12); L1D_TLB_MISS 3.67e6 vs 2.46e6; L2_TLB_MISS_DATA 1.4e3 both. So the slow state
   costs more per L1 miss (slower L2/fabric response or different prefetching), not more misses; no M1 counter here
   separates L2 from the system-level cache. Supports keeping the chase's working set in L1.
+- **L1 blocking of the chase: not worth it** (`scripts/kernels/wavefront.c`, `build/wavefront-1204.txt`; the chase's
+  lower-triangle memory pattern, n = 1204, sweeps in groups of g as a wavefront with sweep s + j trailing by 2j bulges,
+  the least lag that keeps the order: sweep s + 1's bulge k shares an element with sweep s's bulge k + 2). Speed-up over
+  sequential, g = 2 / 3 / 4 / 6: FP64 b = 32 1.12 / 1.08 / 1.05 / 0.97 (10.6 ms sequential), b = 40 1.05 / 1.00 /
+  0.96 / 0.92, b = 48 1.00 / 0.94 / 0.91 / 0.90 (14.8 ms); FP32 b = 32 1.05 / 1.03 / 0.99 / 0.96, b = 48 1.00 / 0.96 /
+  0.94 / 0.93. The sequential order already streams well (prefetching); the wavefront's live set is ~2g bulge regions
+  (2.5 b² elements each, ~+30% line waste: 46 KB at b = 48 FP64 vs 128 KB L1, 128-byte lines), and padding can't align
+  segments because every sweep shifts the window by one row. The memory pattern is ~40% of the chase (14.8 of ~39 ms
+  at b = 48, fast state). Dropped, as is an aligned scratch window.
