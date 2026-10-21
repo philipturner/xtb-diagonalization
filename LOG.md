@@ -21,3 +21,17 @@
   larger matrix: consistent with H1, but AMX sharing per cluster isn't ruled out.
 - **Next:** the user reviews `baseline.md` before Phase 2. Suggested BRIEF corrections: production = main, gate noise
   floor, 2x target needs −72–90% eigensolve at n ≈ 410–450.
+
+## 2026-10-20 (later) — BRIEF corrected, gates reset
+
+- **BRIEF.md corrected** from Phase 1: production = upstream main (fork `8ea5fcd`), v6.7.1 for timing only; current
+  profile shares next to the old ones; what 2x takes; hypothesis status; Phase 1 marked done; Phase 2 step 1 (cached
+  Cholesky) already in production; pseudodiag answer; pushing is the user's step (permissions now deny `git push`,
+  including `git -C … push`: both tested and blocked).
+- **Gates reset to the measured noise floor.** Warm-vs-cold maxima over 120 runs: 1.2e-7 Eh, 5.4e-5 Eh/bohr, 9.3e-6 Eh
+  gap, 2.9e-4 e, 1.1e-3 occupations. New gates, all phases: 5e-7 Eh, 2e-4 Eh/bohr, 5e-5 Eh, 1e-3 e, 5e-3; Phase 2
+  ≤ 2 extra cycles per run and total within ±1%, Phases 3–4 ≤ 10% (min 2) extra per run. `compare.py --gates
+  phase2|approx|identical`; main passes all three.
+- **Next:** Phase 2 step 0, the noise floor on the full 174-run grid (warm start from the neighbouring temperature),
+  then the GEMM-based transform and the hook point. CLAUDE.md still says pushing `diagonalization` is allowed: the
+  user decides whether to change it.

@@ -8,8 +8,9 @@ its _rms15 copy. Every point is computed three ways:
   cold    fresh xtb_newResults per point (production)
   chain   one results handle along the scan (xtb_updateMolecule), as a chained relaxation would
   seed    every point starts from a copy (xtb_copyResults) of the converged t = 0 results, like swift-xtb's xTB_Seed
-Records SCC cycles (from xtb's own output), energy, HOMO-LUMO gap and occupations per point and mode, and whether the
-warm runs reach the cold run's SCF solution. Cycle counts need a library whose xtb_releaseOutput closes the file
+Records SCC cycles (from xtb's own output), energy, HOMO-LUMO gap and occupations per point and mode, the warm runs'
+largest differences from the cold run (energy, gap, occupations, gradient, charges), and whether they reach the cold
+run's SCF solution. Cycle counts need a library whose xtb_releaseOutput closes the file
 (main; not v6.7.1).
 """
 import ctypes as C, json, os, re, sys, tempfile
@@ -69,10 +70,12 @@ def main():
             ev = (C.c_double * nao.value)(); oc = (C.c_double * nao.value)()
             L.xtb_getOrbitalEigenvalues(env, res, ev); L.xtb_getOrbitalOccupations(env, res, oc)
             ev, oc = np.array(ev), np.array(oc)
+            g = (C.c_double * (3 * n))(); q = (C.c_double * n)()
+            L.xtb_getGradient(env, res, g); L.xtb_getCharges(env, res, q)
             occ, vir = np.where(oc > 0.5)[0], np.where(oc < 0.5)[0]
             # with SCC iterations counted per call; xtb restarts the count from the restart file's history
             return dict(cycles=max(it) if it else None, converged=ok, energy_Eh=e.value,
-                        gap_Eh=float(ev[vir].min() - ev[occ].max()), occ=oc)
+                        gap_Eh=float(ev[vir].min() - ev[occ].max()), occ=oc, grad=np.array(g), q=np.array(q))
 
         seed = C.c_void_p(L.xtb_newResults()); s0 = sp(seed, 0.0)
         chain = C.c_void_p(L.xtb_newResults())
@@ -88,6 +91,9 @@ def main():
                 if name != 'cold':
                     dE = abs(w['energy_Eh'] - cold['energy_Eh']); docc = float(np.abs(w['occ'] - cold['occ']).max())
                     p[name].update(dE_vs_cold=dE, docc_vs_cold=docc,
+                                   dgap_vs_cold=abs(w['gap_Eh'] - cold['gap_Eh']),
+                                   dgrad_vs_cold=float(np.abs(w['grad'] - cold['grad']).max()),
+                                   dq_vs_cold=float(np.abs(w['q'] - cold['q']).max()),
                                    same_solution=bool(dE <= 1e-7 and docc <= 1e-3 and abs(w['gap_Eh'] - cold['gap_Eh']) <= 1e-5))
             pts.append(p)
             print(f"{sid:18s} t {t:.2f}  cycles cold {cold['cycles']!s:>3s} chain {ch['cycles']!s:>3s} seed {sd['cycles']!s:>3s}"

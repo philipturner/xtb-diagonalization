@@ -166,11 +166,14 @@ Chained starts need 18–37 cycles per point where cold needs 26–105; the fixe
 moves away from the seed (from 18 to 38 cycles on `facet_closed`). Every warm point reaches the cold SCF solution:
 largest differences 1.2e-7 Eh in energy, 2e-4 eV in gap, 1.1e-3 in occupations (`s12_C31`, gap 0.15–0.18 eV).
 
-**Consequence for the Phase 3 gates.** Those differences are the SCC's own convergence noise (energy criterion
-1e-6 Eh at accuracy 1.0), yet five of the 63 warm `s12_C31` points exceed the proposed approximate gates (|ΔE| ≤
-1e-7 Eh, occupations ≤ 1e-3). An approximate eigensolver that only changes the SCC trajectory can fail those gates
-on small-gap radicals without being wrong. The gates for Phases 3–4 should be set against this noise floor (for
-example, compare against several cold restarts) before they are used to reject a method.
+**Noise floor and the gates.** A rerun of the same scans with gradients and charges recorded gives the largest
+warm-vs-cold differences over all 120 warm runs (95th percentile in brackets): energy 1.2e-7 (8e-8) Eh, gradient
+5.4e-5 (3e-5) Eh/bohr, gap 9.3e-6 (4e-6) Eh, charges 2.9e-4 (1.4e-4) e, occupations 1.1e-3 (6e-4). These are the SCC's
+own convergence noise (energy criterion 1e-6 Eh at accuracy 1.0). The first proposed approximate gates sat below it
+(gradient 1e-6, charges 1e-5: 54x and 29x below the noise), and its exact gates (1e-10 Eh) below what a correct
+upstream reformulation produced (v6.7.1 → main: up to 7.9e-8 Eh). The gates in `BRIEF.md` were reset on 2026-10-20 to
+3–5x the measured noise, the same for every phase: |ΔE| ≤ 5e-7 Eh, gradient ≤ 2e-4 Eh/bohr, gap ≤ 5e-5 Eh, charges
+≤ 1e-3 e, occupations ≤ 5e-3; phases differ only in the allowed extra SCC cycles. `scripts/compare.py` implements them.
 
 ## Pseudodiagonalization history
 

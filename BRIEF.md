@@ -1,6 +1,6 @@
 # xTB Diagonalization Profiling Brief
 
-Oct 19, 2026 · @Philip Turner
+Oct 19, 2026 · @Philip Turner · corrected Oct 20, 2026 after Phase 1 (`baseline.md`)
 
 ## Goal and success criteria
 
@@ -14,32 +14,42 @@ Measure these, before and after each change:
 - **Throughput:** jobs per second at n ≈ 450 and n ≈ 750, comparing the current production setup (5–6 processes × 2 threads) against 8–10 processes × 1 thread.
 - **Accuracy:** the gates in the Validation section. A change that fails a gate doesn't count, however fast it is.
 
+What 2x takes (measured in Phase 1, `baseline.md`): the eigensolve is 56–69% of a single point at n ≈ 410–450, and
+everything else is already close to half. If only the eigensolve gets faster, 2x needs it 72–78% cheaper on the
+slowly converging production systems (`s12_C31`, `facet_dbpair_tool`) and 90% cheaper on fast-converging ones like
+`facet_closed` (26 cycles). At n = 776 the eigensolve alone can't reach 2x: the work outside the SCC loop (integral
+derivatives and gradient) is more than half. Fewer SCC cycles (Phase 3) and cheaper full solves (Phases 2 and 4) both
+count; the outside-loop work is the next target after the eigensolve.
+
 ## What is already known
 
-The eigensolve is 75% of a single point, and its biggest piece is one BLAS2 routine. This Instruments profile is from `Experiments/OptimizingDiagonalization/Diamond233.png` and `DSYEVD.png`: n = 776, 19 SCC cycles, Homebrew `libxtb.6.dylib` linked to Accelerate.
+The eigensolve is the largest single cost, and its biggest piece is one BLAS2 routine. An older Instruments profile (`Experiments/OptimizingDiagonalization/Diamond233.png` and `DSYEVD.png`: n = 776, 19 SCC cycles, Homebrew `libxtb.6.dylib` linked to Accelerate, S refactored every cycle) put it at 75% of a single point. On the production code (upstream main) it is 48% at n = 776 and 56–69% at n = 412–448 (Phase 1, `baseline.md`, 1 thread):
 
-| Routine (call path) | Share of total | Kind of work |
-| --- | --- | --- |
-| `mctc_dsygvd` → `DSYGVD` (everything below) | 74.6% | — |
-| `DSYTRD` → `DLATRD` → `DSYMV` | 29.8% | BLAS2, memory-bound |
-| `DSYTRD` → `DLATRD` → `DGEMV` | 5.8% | BLAS2 |
-| `DSYTRD` → `DSYR2K` | 3.1% | BLAS3 |
-| `DSTEDC` (divide and conquer) | 15.5% | Mostly scalar |
-| `DORMTR` (back-transformation) | 9.6% | BLAS3 |
-| `DSYGST` + `DTRSM` + `DPOTRF` | 8.8% | BLAS3 |
-| `mmompop`, `setvsdq`, `dmat`, H build | \~15% | xTB's own code |
+| Routine (call path) | Old profile, n = 776 | Production code, n = 776 | Production code, n = 448 | Kind of work |
+| --- | --- | --- | --- | --- |
+| eigensolve (`DSYGVD` then; `mctc_dsygvd_factorized` now) | 74.6% | 48.2% | 64.5% | — |
+| `DSYTRD` → `DLATRD` → `DSYMV` | 29.8% | 19.2% | 19.5% | BLAS2, memory-bound |
+| `DSYTRD` → `DLATRD` → `DGEMV` | 5.8% | — | — | BLAS2 |
+| `DSYTRD` → `DSYR2K` | 3.1% | 2.4% | 2.5% | BLAS3 |
+| `DSTEDC` (divide and conquer) | 15.5% | 11.5% | 19.6% | Mostly scalar |
+| `DORMTR` (back-transformation) | 9.6% | 6.4% | 8.9% | BLAS3 |
+| `DSYGST` + `DTRSM` + `DPOTRF` | 8.8% | ≤ 12% (overlapping) | ≤ 14% (overlapping) | BLAS3 |
+| `mmompop`, `setvsdq`, `dmat`, H build | \~15% | 10% | 14% | xTB's own code |
+| integral derivatives + gradient (outside the SCC loop) | — | 35% | 18% | xTB's own code, OpenMP |
+
+Inside the SCC loop the eigensolve is 79–80% of every cycle at n ≥ 412 (12–14 ms per cycle at n = 412–448, 35 ms at 619, 58 ms at 776).
 
 Other facts already established:
 
 - Switching OpenBLAS to Accelerate made one thread per job optimal (down from 8), and running many single-threaded jobs in parallel raised throughput about 20x.
-- `DPOTRF` appears under `DSYGVD` in the profile, so S is refactored every cycle in that build. Current xTB master no longer does this (see Code map).
+- `DPOTRF` appears under `DSYGVD` in the old profile, so S was refactored every cycle in that build. Current xTB master no longer does this, and neither does production, which is built from master (see Code map). Measured saving of the cached factor against v6.7.1: 1–4% (`baseline.md`).
 - `OptimizingDiagonalization.md` projects 1.86 s → 0.89 s at n = 776 if diagonalization cost only as much as divide and conquer, and → 0.55 s if the remaining LAPACK work and other kernels also moved to FP32. Neither was implemented.
 
 Hypotheses this work should confirm or kill:
 
-1. **H1:** `DSYMV` is limited by L2 bandwidth. Parallel jobs scale with cores until working sets overflow L2 (12 MB per 4-core P-cluster on M1 Max; an n = 776 FP64 matrix is 4.8 MB, n = 1,000 is 8 MB).
-2. **H2:** After the first few SCC cycles, the Hamiltonian changes little, so most cycles don't need a full diagonalization.
-3. **H3:** The matrix units (AMX) are not the bottleneck, since only \~20% of the eigensolve is BLAS3.
+1. **H1:** `DSYMV` is limited by L2 bandwidth. Parallel jobs scale with cores until working sets overflow L2 (12 MB per 4-core P-cluster on M1 Max; an n = 776 FP64 matrix is 4.8 MB, n = 1,000 is 8 MB). *Phase 1: consistent, not proven.* Two processes scale perfectly; at 8 × 1 thread each job is 32% slower at n = 448 and 58% slower at n = 655. Each P-cluster also shares one AMX unit, so AMX contention isn't ruled out. 8 × 1 thread gives 15–23% more throughput than production's 6 × 2.
+2. **H2:** After the first few SCC cycles, the Hamiltonian changes little, so most cycles don't need a full diagonalization. *Phase 1: not measured directly.* Even chained warm starts still need 18–37 cycles per point.
+3. **H3:** The matrix units (AMX) are not the bottleneck, since only \~20% of the eigensolve is BLAS3. *Phase 1: consistent:* `dgemm` is 18–20% of samples; `dsymv` and the scalar `dlaed4` dominate.
 
 ### Production sizes and the test set
 
@@ -74,7 +84,7 @@ What this changes:
 
 - **One eigensolve per cycle, even with `--uhf`.** In xTB's own `scc` loop, `fact_solve` runs once per cycle and `fermismear` applies separate α and β occupations to the same eigenvalues; GFN2 here has no spin-dependent Hamiltonian. The C API's uhf argument to xtb\_newMolecule only sets the unpaired-electron count on this same path.
 - **15–116 SCC cycles per single point (measured),** 30–60 typical for production systems and 76–116 for the Stage 1/2 regions, against 13–19 for the diamond cells. Three runs hit the 250-iteration cap (uhf 3 or 2 at 100 K). That makes Phase 3 (eigenvector reuse) and cycle count itself more important, and the diamond cells alone are not representative.
-- **Per-cycle cost is \~25–30 ms at n ≈ 410–450** (measured, whole cycle), so fixed overheads, workspace handling and driver choice matter as much as asymptotic speed.
+- **Per-cycle cost is \~15–18 ms at n ≈ 410–450 for a process running alone** (Phase 1, whole cycle; the \~25–30 ms above were measured with 4 jobs at once), so fixed overheads, workspace handling and driver choice matter as much as asymptotic speed.
 - **Working sets mostly fit in L2:** an n = 450 FP64 matrix is 1.6 MB, n = 650 is 3.4 MB. H1 may only bite for the Stage 3 regions and diamond233.
 - **The converged state depends on the settings.** Several systems land on different SCF solutions at different electronic temperatures (for example `facet_dbpair` uhf 0: gap 0.02 eV at 100 K, 1.51 eV at 300 K). Any change that alters which solution is found must be caught by the gates, not mistaken for a speedup.
 
@@ -92,11 +102,11 @@ The released xTB still runs a full `dsygvd` every SCC cycle, while master alread
 | `src/pseudodiag.f90` | Stewart–Császár–Pulay (1982) pseudodiagonalization: occupied–virtual Jacobi rotations, FP32 scratch, OpenMP. |
 | `src/scf_module.F90` (\~line 281) | `startpdiag=1000`, commented "large number=never", so pseudodiag is disabled. |
 
-Release **v6.7.1** calls `solver%solve(env, H, S, emo)` at `scc_core.f90` line 440: a full `dsygvd`, including `dpotrf`, every cycle. That matches the profile. The cached-Cholesky path exists only on master.
+Release **v6.7.1** calls `solver%solve(env, H, S, emo)` at `scc_core.f90` line 440: a full `dsygvd`, including `dpotrf`, every cycle. That matches the old profile. The cached-Cholesky path exists only on master, which is what production runs (below). Phase 1 found two more v6.7.1 problems fixed on master: its GFN2 gradients are wrong on structures with atoms on symmetry axes (#1208, #1214; the error depends on the compiler), and its C API never closes the output file (#1434). Use v6.7.1 for timing comparisons only.
 
 ### Production entry point: the C API
 
-Production uses ONE library: `../claude-molecular-renderer/libxtb.dylib`, at the root of the mechanosynthesis repository (a sibling of this one) (xtb 6.7.1 built against Accelerate, shipped with the molecular-renderer v1.0.2 binaries). Both that repository's Python wrapper `Sources/Workspace/Data/stage3/scripts/lib/xtb_lib.py` and the Swift code (swift-xtb `main`) load it; Homebrew's xtb is not used in production. A deliverable is a drop-in replacement for this file, checked from both Python and Swift. Python calls the xTB C API (`include/xtb.h`) directly through ctypes; no tblite is involved. `scripts/make_reference.py` is a self-contained copy of the production call sequence (plus charges, orbitals and the SCC iteration count) and is the benchmark driver to start from. The path below matches the top of the n = 776 profile, which starts at `xtb_singlepoint`.
+Production uses ONE library: `../claude-molecular-renderer/libxtb.dylib`, at the root of the mechanosynthesis repository (a sibling of this one) (shipped with the molecular-renderer v1.0.2 binaries). It is **not** release 6.7.1: it was built from the fork's `swift-xtb-2026` branch at `8ea5fcd`, which is upstream main `68fe777` plus two commits that only stop GFN-FF from reading or writing files in the working directory, so its GFN2 code is identical to main (the version string still says 6.7.1). Build: CMake, Homebrew GCC 16, `-DBLA_VENDOR=Apple` (Accelerate, legacy LAPACK symbols), no tblite or CPCM-X, as in swift-xtb's `compile-macos.sh`; `scripts/build_xtb.sh` repeats it, and that build reproduces `reference/` bit for bit. Both that repository's Python wrapper `Sources/Workspace/Data/stage3/scripts/lib/xtb_lib.py` and the Swift code (swift-xtb `main`) load it; Homebrew's xtb is not used in production. A deliverable is a drop-in replacement for this file, checked from both Python and Swift. Python calls the xTB C API (`include/xtb.h`) directly through ctypes; no tblite is involved. `scripts/make_reference.py` is a self-contained copy of the production call sequence (plus charges, orbitals and the SCC iteration count) and is the benchmark driver to start from. The path below matches the top of the n = 776 profile, which starts at `xtb_singlepoint`.
 
 ```
 Python (ctypes) → libxtb.dylib
@@ -138,26 +148,32 @@ This repository (github.com/philipturner/xtb-diagonalization, private) is the wh
 | Path | What it is |
 | --- | --- |
 | `BRIEF.md` | This plan and its acceptance criteria |
+| `baseline.md`, `LOG.md` | Phase 1 measurements; one log entry per session |
 | `xtb/` | Git submodule: the fork github.com/philipturner/xtb, at `68fe777` (= grimme-lab/xtb `main`, 2026-10-08). Remote `upstream` = grimme-lab/xtb. Full history, so `git log -S` works |
 | `structures/` | Test set (30 `.xyz`) and `MANIFEST.tsv` |
 | `reference/` | Production-library results per structure × uhf × electronic temperature, and `SUMMARY.tsv` |
 | `scripts/make_reference.py` | Benchmark/reference driver: production C API call sequence; `--lib` picks the library, `--out` the output folder |
+| `scripts/build_xtb.sh` | Builds a tree the way production is built (out of source, under `build/`) |
+| `scripts/compare.py` | Checks a run folder against `reference/` with the Validation gates |
+| `scripts/bench.py`, `sweep.py`, `warmstart.py`, `callshare.py`, `latency.py` | Timed single points (with the per-cycle breakdown from a timer build), concurrency sweep, cold vs warm scans, Time Profiler aggregation, Accelerate-vs-OpenBLAS check |
 | `scripts/provenance/make_testset.py` | How the structures were made (ran once in the mechanosynthesis repo; doesn't run here) |
 | `build/` | Build trees and scratch, git-ignored |
 
 Workflow for xTB changes:
 
 - All xTB work goes on ONE branch of the fork, `diagonalization` (public; already created locally in `xtb/`, tracked by `.gitmodules`). One commit per step with its measurement in the message. Commit the new submodule pointer in this repository at the same time, so every result here names the exact xTB commit it came from. Short experiments may use side branches (`diag/<topic>`) that merge into `diagonalization`.
-- The fork's `main` is never committed to: it only mirrors grimme-lab's `main`, so syncing is a fast-forward (`git -C xtb fetch upstream`, then `git -C xtb push origin upstream/main:main`). Bring upstream changes into the work with `git -C xtb merge upstream/main` on `diagonalization` (merge, not rebase, because the branch is public).
+- The fork's `main` is never committed to: it only mirrors grimme-lab's `main`, so syncing is a fast-forward (`git -C xtb fetch upstream`, then the user runs `git -C xtb push origin upstream/main:main`). Bring upstream changes into the work with `git -C xtb merge upstream/main` on `diagonalization` (merge, not rebase, because the branch is public).
 - Differences from upstream are plain git: `git -C xtb diff upstream/main...diagonalization`, `git -C xtb log upstream/main..diagonalization`.
-- Pushing `diagonalization` (and `diag/*`) to the fork is allowed. Never push to the fork's `main` anything but a fast-forward to upstream, never force-push `diagonalization`, and ask the user before opening pull requests upstream.
-- Baseline v6.7.1 (the version of the production library): `git -C xtb fetch upstream --tags`, then `git -C xtb worktree add ../build/xtb-v6.7.1 v6.7.1`. Don't edit it.
-- Build trees go under `build/` (for example `build/xtb-build-main/`, `build/xtb-build-v6.7.1/`). Meson subprojects (mctc-lib and others) are downloaded when a build is configured: allow their hosts once, then build offline.
+- Pushing is the user's step: Claude commits to `diagonalization` and `diag/*` (and to this repository), and the user pushes; Claude's permission rules deny `git push`. The fork's `main` only ever gets a fast-forward to upstream, `diagonalization` is never force-pushed, and pull requests upstream need the user's go-ahead.
+- Release v6.7.1, for timing comparisons only (production is main, see Code map): worktree `build/xtb-v6.7.1` (`git -C xtb worktree add ../build/xtb-v6.7.1 v6.7.1`); don't edit it. It needs mctc-lib `77f65c6` (its CMake fetches an unpinned `HEAD` that no longer configures) and `-std=gnu17` under GCC 16; see `baseline.md`. Side branch `diag/timers-v6.7.1` carries the SCC timers for it.
+- Build trees go under `build/` (`build/xtb-build-main/`, `build/xtb-build-v6.7.1/`, …) via `scripts/build_xtb.sh`. CMake fetches mctc-lib with git at configure time; the sandbox blocks git from writing hook files, so configure runs outside it once, then builds run inside it, offline.
 - The mechanosynthesis repository is read-only from here: never write into `../claude-molecular-renderer`, and never replace its `libxtb.dylib`. A faster library is handed over only after the gates pass from both Python and Swift, and the user decides.
 
 ## Phase 1: Profiling harness and baseline
 
 The deliverable is a reproducible baseline that every later phase is measured against, built from source rather than taken from a prebuilt binary.
+
+**Status: done 2026-10-20; results in `baseline.md`.** Corrections that came out of it: production is upstream main, not v6.7.1, so the main build (not v6.7.1) is the one that reproduces `reference/`, and does so bit for bit on all 174 runs. The concurrency sweep left out 10 concurrent processes by the user's decision: background work such as Photos' analysis can't be controlled in production, so 10 single-threaded jobs on 8 P + 2 E cores isn't worth recommending. The steps below are kept as they were run.
 
 1. **Build two xTB trees on macOS arm64 against Accelerate:** v6.7.1 (worktree `build/xtb-v6.7.1/`, the version of the production library) and main (the `xtb/` submodule). `meson_options.txt` has no Accelerate choice; `-Dlapack=custom` with `custom_libraries` is the likely route, but check how Homebrew's formula links it first. Confirm with `otool -L` that the binary links Accelerate, not OpenBLAS, and cross-check at run time against `reference/LATENCY.md` (`scripts/latency.py`: production Accelerate vs Homebrew OpenBLAS, OpenBLAS 1.5–1.7x slower single-threaded at n ≥ 400). Check that your v6.7.1 build reproduces `reference/` (energies to 1e-10 Eh, same SCC iteration counts). If it doesn't, find out how the production `libxtb.dylib` was built before going further.
 2. **Fix the environment for every run:** `OMP_NUM_THREADS=1`, `VECLIB_MAXIMUM_THREADS=1`, on AC power, Low Power Mode off. Record macOS version and chip. Time only when the Mac is otherwise idle: other Claude sessions run long GFN2 jobs here. Check `ps`/load first, and ask the user for a quiet window if needed.
@@ -169,9 +185,10 @@ The deliverable is a reproducible baseline that every later phase is measured ag
 
 ## Phase 2: Low-risk changes in the xTB tree
 
-These are pure reformulations, so results must match the baseline to 1e-10 Eh. Expect a few percent, not a multiple; their main value is a clean place to hook Phase 3.
+These are reformulations: exact in exact arithmetic, but they change rounding, and the SCC carries rounding differences up to the size of its own convergence noise. Phase 1 measured this on an upstream reformulation (v6.7.1's full `dsygvd` against main's cached factor): energies moved by up to 7.9e-8 Eh, 124 of 174 runs by more than 1e-10. So they are gated at the measured noise floor like every phase, with a tighter cycle-count rule (Validation). Expect a few percent, not a multiple; their main value is a clean place to hook Phase 3.
 
-1. **Cached Cholesky.** Work on master, which already factors S once per geometry. Confirm the measured saving against v6.7.1 (the profile suggests \~1.5% at n = 776 from `DPOTRF`).
+0. **Noise floor on the whole grid.** Phase 1 measured it on three 300 K scans only. Before using the gates, measure it for every `reference/` run: rerun each single point starting from the converged result of the same structure and spin state at the neighbouring electronic temperature (`xtb_copyResults`), which changes only the SCC trajectory, and take per-quantity maxima over runs that reach the same SCF solution. If any maximum exceeds half of its gate, raise the gate and record why.
+1. **Cached Cholesky.** Already in production (master factors S once per geometry). Measured saving against v6.7.1: 1–4% at n ≤ 619 (`baseline.md`). Nothing left to do.
 2. **GEMM-based transform.** Replace `dsygst` + `dtrsm` in `mctc_dsygvd_factorized` with a matrix X formed once per geometry, X = U⁻¹ from the Cholesky factor. Each cycle becomes H′ = Xᵀ H X (two GEMMs, or `dsymm` + `dgemm`), `dsyevd` on H′, then C = X C′ (one GEMM). These moves \~7% of runtime onto matrix-unit-friendly GEMMs. Measure; don't assume it's faster at small n.
 3. **One hook point.** Route every eigensolve through a single new subroutine that receives the cycle number, the previous eigenvectors and eigenvalues, and the factor X. Phase 3 changes only this routine.
 4. The three under-review PRs by https://github.com/g8j39 on the grimme-lab/xtb repository: 1464, 1465, 1466. Small incremental wins worth investigating.
@@ -184,7 +201,7 @@ Commit each step separately, with its measurement in the commit message.
 
 This is the largest expected win: with 19 cycles at n = 776, most full diagonalizations repeat work on a Hamiltonian that barely changed. Try the options in this order and keep the cheapest one that passes every gate.
 
-Before touching the eigensolver, measure warm starts as a side experiment. Run a 20-step scan through the C API three ways:
+Before touching the eigensolver, measure warm starts as a side experiment (*done in Phase 1, `baseline.md`: over 21-point scans, chained starts need 35–55% fewer SCC cycles, a fixed seed 12–33% fewer, and every point reaches the cold SCF solution*). Run a 20-step scan through the C API three ways:
 
 1. a fresh `xtb_newResults` per point (production);
 2. one handle reused with `xtb_updateMolecule` (chained);
@@ -192,7 +209,7 @@ Before touching the eigensolver, measure warm starts as a side experiment. Run a
 
 Compare SCC cycles per point, final energies and whether every point reaches the same SCF solution as its cold start. This only says how much warm starts could save where they are allowed (roughly half of practical uses). Every option below must also deliver its speedup on cold starts, which stay the default.
 
-1. **Find out why pseudodiag was disabled.** Clone with full history and run `git log -S startpdiag` and `git log -S pseudodiag`. A recorded accuracy or convergence failure changes the plan; report it before writing code.
+1. **Find out why pseudodiag was disabled.** *Done in Phase 1: no recorded reason.* `startpdiag=1000 !large number=never` is already in the 6.2 import (`29ce1a1`, 2019-09-30), the first commit of the public history, and since #192 (2020-05) the legacy `solve` that calls `pseudodiag` is commented out, so it is dead code. Nothing recorded changes the plan.
 2. **Option A: re-enable the existing path.** Wire the legacy `solve` logic into the Phase 2 hook: full solve for the first k cycles (try k = 3, 5, 8), then rotate H into the previous MO basis, call `pseudodiag`, and rotate back. Because the previous C satisfies Cᵀ S C = I, Cᵀ H C works directly in the generalized problem. Always do a full solve on the final cycle, so printed orbitals and gradients come from exact eigenvectors.
 3. **Option B: GEMM-only refinement.** If A fails the gates, replace pseudodiag with an Ogita–Aishima-style refinement in the previous basis (a few GEMMs per cycle, quadratically convergent). Near-degenerate orbitals, which the symmetric diamond cells have, need the clustered-eigenvalue variant. Fall back to a full solve whenever the residual ‖H′C − CΛ‖ exceeds a threshold.
 4. **Option C: mixed precision.** Independently of A or B, test FP32 `ssyevd` for early cycles and FP64 for the last few (`solve4` is the precedent).
@@ -219,19 +236,29 @@ Start this only if, after Phase 3, full diagonalizations are still more than \~2
 
 ## Validation and pitfalls
 
-A speedup counts only if it passes every gate on every system in the test set. These thresholds are proposals; tighten them if downstream use needs it.
+A speedup counts only if it passes every gate on every system in the test set.
+
+The gates are set against the SCC's own convergence noise, measured in Phase 1: the same single point started from a different (warm) wavefunction converges to the same SCF solution, but differs from the cold result by up to the amounts below. Anything that changes the SCC trajectory, including an exact reformulation that only changes rounding, can move results by that much, so a gate below the noise would reject correct methods. The first proposal (1e-10 Eh exact, 1e-7 Eh approximate) was below it: plain warm starts fail its approximate gradient gate by 54x and its charge gate by 29x.
+
+| Quantity | Noise floor: max (95th percentile), 120 warm-start runs, 3 systems, 300 K | Gate, all phases | Gate / max noise |
+| --- | --- | --- | --- |
+| Total energy, \|ΔE\| | 1.2e-7 (8e-8) Eh | ≤ 5e-7 Eh | 4x (half the SCC energy criterion, 1e-6 Eh at accuracy 1.0) |
+| Gradient, max \|Δg\| | 5.4e-5 (3e-5) Eh/bohr | ≤ 2e-4 Eh/bohr (0.010 eV/Å) | 4x |
+| HOMO–LUMO gap | 9.3e-6 (4e-6) Eh | ≤ 5e-5 Eh (1.4 meV) | 5x |
+| Atomic charges, max \|Δq\| | 2.9e-4 (1.4e-4) e | ≤ 1e-3 e | 3x |
+| Occupations, max \|Δf\| (same SCF solution) | 1.1e-3 (6e-4) | ≤ 5e-3 | 5x |
+
+The phases differ in SCC cycles only:
 
 | Check | Phase 2 (reformulation) | Phases 3–4 (approximate) |
 | --- | --- | --- |
-| Total energy, \|ΔE\| | ≤ 1e-10 Eh | ≤ 1e-7 Eh |
-| Gradient, max \|Δg\| | ≤ 1e-9 Eh/bohr | ≤ 1e-6 Eh/bohr |
-| HOMO–LUMO gap | ≤ 1e-8 Eh | ≤ 1e-5 Eh |
-| Atomic charges | ≤ 1e-8 e | ≤ 1e-5 e |
-| SCC cycles | Unchanged | At most 1 more |
-| Same SCF solution | Same occupations (to 1e-6) and gap as `reference/` | Same occupations (to 1e-3) and gap as `reference/` |
+| SCC cycles per run | At most 2 more than `reference/` | At most 10% (and at least 2) more than `reference/` |
+| SCC cycles, total over the grid | Within ±1% of `reference/` | Reported; the wall-time gain is what counts |
 | Convergence | Every run that converges in `reference/` still converges | Same |
 
-Run the gates at all three electronic temperatures and both uhf values in `reference/`, not just production's 300 K. The hard cases are open-shell systems with small gaps (`facet_dbpair_tool`, `facet_bare_dimer`, `facet_dbpair`, `s12_*`, the uhf 2/3 states) and the off-equilibrium `_rms15` copies. Approximate eigenvectors are most likely to fail there, and a change that moves a run onto a different SCF solution fails the gate even if its energy is lower.
+Different SCF solutions differ by far more than these gates (for example `facet_dbpair` uhf 0: gap 0.02 eV at 100 K, 1.51 eV at 300 K; occupations change by O(1)), so the gates still catch a move to another solution. A Phase 2 change whose differences approach the gates is suspect even if it passes: in Phase 1, the upstream v6.7.1 → main change stayed below 7.9e-8 Eh, 2.1e-6 Eh in gap, 2.0e-5 e in charges and 5.7e-4 in occupations, under a quarter of each gate. The noise floor comes from three 300 K scans at production uhf; Phase 2 step 0 extends it to the full grid. `scripts/compare.py` implements these gates.
+
+Run the gates at all three electronic temperatures and both uhf values in `reference/`, not just production's 300 K. Runs that do not converge in `reference/` (three hit the 250-cycle cap) are checked only for convergence status. The hard cases are open-shell systems with small gaps (`facet_dbpair_tool`, `facet_bare_dimer`, `facet_dbpair`, `s12_*`, the uhf 2/3 states) and the off-equilibrium `_rms15` copies. Approximate eigenvectors are most likely to fail there, and a change that moves a run onto a different SCF solution fails the gate even if its energy is lower.
 
 Pitfalls to avoid:
 
@@ -243,6 +270,8 @@ Pitfalls to avoid:
 - **One commit per step** on a branch in `xtb/`, with the measurement in each message, plus the matching submodule-pointer commit here.
 
 ## Kickoff prompt for Claude Code
+
+Phase 1 is done (2026-10-20). This is the prompt it was run with; later sessions start from `LOG.md` and `baseline.md` instead. Note that its v6.7.1 reproduction step was wrong: production is main, and the main build is the one that reproduces `reference/`.
 
 Start Claude Code in this repository's root on the M1 Max and paste:
 
