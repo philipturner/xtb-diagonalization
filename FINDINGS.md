@@ -28,7 +28,10 @@ single points as the production library at production's 6 × 2 (n = 448: 4.17 �
 and about **2.0x** at n = 655 (1.80 → 3.59 jobs/s). About 1.3x of it is the library at 6 × 2 (n = 448: 6.21 jobs/s), the
 rest the switch to 8 × 1.
 
-**Drop-in:** the production Python wrapper (`xtb_lib.py`, unchanged, `LIB` pointed at the build) runs it and agrees
+**Drop-in candidate: branch `diag/production` (`05f17ac`)** = `diagonalization` + the fork's `swift-xtb-2026` GFN-FF
+commits that the production library carries. Without them, GFN-FF writes `gfnff_topo` into the working directory.
+With them, GFN-FF is bit-identical to production and writes nothing; GFN2 is identical to `diagonalization`.
+The production Python wrapper (`xtb_lib.py`, unchanged, `LIB` pointed at the build) runs it and agrees
 with the production library to 1e-13 Eh and 7e-13 Eh/bohr on three production systems. Swift not checked.
 
 Per single point at n ≈ 410–450, 2x is not reached under the gates (1.51–1.66x). What is left: the eigensolve is
@@ -107,11 +110,16 @@ production library at the same accuracy), and production accuracy only checks sa
   eigenvector back-transformation that neither Accelerate nor reference LAPACK provides. The brief's expectation holds.
 - FP32 `ssytrd` is 1.4x faster than `dsytrd`, `sstedc` 1.5x faster than `dstedc`: the FP32 route (Phase 3 C) is the
   cheaper way to the same gain.
+- **`ssyevd_2stage` inaccuracy:** doesn't reproduce. On this macOS (15.7) it exists only in the new interface
+  (`$NEWLAPACK`); its eigenvalues are as accurate as one-stage FP32 (relative error 1.5–3.6e-6 on four GFN2
+  matrices), and it refuses eigenvectors (info −1), like `dsyevd_2stage`.
+- **New-interface `dstedc`:** 5% slower than the legacy one; nothing to gain from switching interfaces.
 
 ## Decisions for you
 
 1. Whether to accept FP32 early cycles for 300 K production use (it fails only 100 K gates).
-2. Whether to push `diagonalization` (local commits only; the three PRs in it are g8j39's, still open upstream), and
+2. Whether to push `diagonalization` and `diag/production` (local commits only; the three PRs in them are g8j39's,
+   still open upstream), whether to hand `diag/production` over as the production library (after a Swift check), and
    whether to offer `sytrd.c` and the `mmompop` change upstream.
 3. Whether to run production as 8 processes × 1 thread: +15–23% throughput with the current library, and with
    `diagonalization` about 2x production's current throughput (measured).

@@ -88,3 +88,7 @@
 - **FP32 latch** (stay in FP64 once switched) tried and reverted: same gate failures (`facet_bare_dimer` u0 300 K
   diverges through the API, though the CLI run of the same structure converges in 48 cycles with FP32; `s12_C00` u3
   100 K at accuracy 0.01). A real safeguard would restart the SCC in FP64 after a failure; not done unsupervised.
+- **Production candidate** `diag/production` (`05f17ac`) = `diagonalization` + `swift-xtb-2026` (GFN-FF file I/O off):
+  GFN-FF bit-identical to production and writes no files (`diagonalization` alone writes `gfnff_topo`); GFN2 identical
+  to `diagonalization` (174/174). FP32 `ssyevd_2stage` (new interface only) is accurate (rel. 1.5–3.6e-6), refuses
+  eigenvectors; new-interface `dstedc` 5% slower than legacy.
