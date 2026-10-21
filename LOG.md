@@ -16,5 +16,8 @@
 - **Warm starts:** chained −35 to −55% SCC cycles, fixed seed −12 to −33%; all reach the cold solution, but the
   s12_C31 differences (≤ 1.2e-7 Eh, occupations 1.1e-3) already touch the Phase 3 gates: gates need a noise floor.
 - **Pseudodiag:** disabled since before the public history (6.2 import, 2019); dead code since #192 (2020-05).
-- **Not done:** concurrency sweep (H1): `mediaanalysisd` was using 70% of a core. Script ready: `scripts/sweep.py`.
-- **Next:** run the sweep in a quiet window, finish `baseline.md`, then the user reviews before Phase 2.
+- **Concurrency sweep** (no 10-process point, by the user's call): 8 × 1 thread gives 4.95 jobs/s at n = 448 and
+  2.21 at n = 655, +15% / +23% over production's 6 × 2. Per-process efficiency 60–67% at 8 processes, lower for the
+  larger matrix: consistent with H1, but AMX sharing per cluster isn't ruled out.
+- **Next:** the user reviews `baseline.md` before Phase 2. Suggested BRIEF corrections: production = main, gate noise
+  floor, 2x target needs −72–90% eigensolve at n ≈ 410–450.

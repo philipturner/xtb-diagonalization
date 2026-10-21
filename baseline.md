@@ -183,7 +183,11 @@ behind the decision: it predates the public history.
 
 ## Hypotheses
 
-- **H1 (DSYMV bound by L2 bandwidth):** pending the concurrency sweep (below).
+- **H1 (DSYMV bound by L2 bandwidth):** consistent, not proven. Per-process efficiency falls from 98% (2 processes)
+  to 74–77% (4) and 60–67% (8), and falls further for the larger matrix (n = 655: 1.6 MB → 3.4 MB per matrix), as
+  bandwidth contention would. But each P-cluster also shares one AMX unit between its 4 cores, so this sweep can't
+  separate L2/DRAM bandwidth from AMX contention. A sweep of `dsymv` alone against `dgemm` alone at the same sizes
+  would.
 - **H2 (H changes little after the first cycles):** not measured directly yet. Indirect: warm starts (chained) need
   35–55% fewer cycles but still 18–37 per point, so the SCC trajectory is long even from a good start.
 - **H3 (AMX not the bottleneck):** consistent so far. `dgemm` is 18–20% of samples, but `dsymv`/`dgemv` inside
@@ -191,7 +195,34 @@ behind the decision: it predates the public history.
 
 ## Concurrency sweep
 
-Pending: needs a quiet machine (`mediaanalysisd` was using 70% of a core when it was due).
+`scripts/sweep.py`, main build, cold single points at production settings: N processes × T threads
+(`OMP_NUM_THREADS` = `VECLIB_MAXIMUM_THREADS` = T), each doing one warm-up, then K jobs from a common start;
+throughput = N·K / time until the last worker finishes. K = 6 at n = 448 (`facet_dbpair_tool` u1), K = 4 at n = 655
+(`s3_S49_163` u1). Load average 1.7 before the sweep (Photos' `mediaanalysisd` was still running at ~70% of a core).
+10 processes were left out on purpose: with background work like that on the machine, which can't be controlled in
+production, 10 single-threaded jobs on 8 P + 2 E cores is not a configuration worth recommending.
+
+| n | N × T | Jobs/s | Per-process efficiency vs 1 × 1 | Median job (s) | Worker elapsed (s) |
+| --- | --- | --- | --- | --- | --- |
+| 448 | 1 × 1 | 0.920 | 100% | 1.084 | 6.52 |
+| 448 | 2 × 1 | 1.812 | 98% | 1.094 | 6.49–6.62 |
+| 448 | 4 × 1 | 2.851 | 77% | 1.292 | 7.74–8.42 |
+| 448 | 8 × 1 | **4.946** | 67% | 1.426 | 8.34–9.71 |
+| 448 | 5 × 2 | 4.005 | — | 1.236 | 7.31–7.48 |
+| 448 | 6 × 2 | 4.290 | — | 1.340 | 7.72–8.39 |
+| 655 | 1 × 1 | 0.459 | 100% | 2.172 | 8.71 |
+| 655 | 2 × 1 | 0.898 | 98% | 2.207 | 8.79–8.91 |
+| 655 | 4 × 1 | 1.365 | 74% | 2.627 | 10.39–11.72 |
+| 655 | 8 × 1 | **2.206** | 60% | 3.441 | 12.48–14.50 |
+| 655 | 5 × 2 | 1.684 | — | 2.922 | 11.51–11.87 |
+| 655 | 6 × 2 | 1.795 | — | 3.285 | 12.85–13.37 |
+
+- **8 × 1 thread beats the production setup:** +15% over 6 × 2 and +24% over 5 × 2 at n = 448; +23% and +31% at
+  n = 655.
+- Two processes scale perfectly; from four on, every job slows down, and more so for the larger matrix (median job
+  +32% at 8 × 1 for n = 448, +58% for n = 655).
+- No worker ran 2–3x slower than the others, so no job stayed on an E-core for long; the 8 × 1 spread (16–17%)
+  suggests some time-sharing with E-cores or with background work. Core placement was not observed directly.
 
 ## Not measured / caveats
 
