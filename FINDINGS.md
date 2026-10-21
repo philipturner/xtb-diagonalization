@@ -147,8 +147,12 @@ production library at the same accuracy), and production accuracy only checks sa
 1. Whether FP32 early cycles are worth a safeguard (restart the SCC in FP64 when it stalls): +12–25% per single point,
    but as is it breaks fragile cold runs, including one at 300 K. It stays off by default. For seeded work it added no
    failures over the grid and stacks with the seed (−38.1% together), so enabling it only for seeded single points is
-   an option even without the safeguard. **Deferred by the user (2026-10-21):** the FP64 fallback and a way for the
-   caller to enable FP32 come later; Phase 4 first.
+   an option even without the safeguard. **Safeguard done (2026-10-21, `diagonalization` `4d68074`):** an FP32 run that
+   doesn't converge within `XTB_SCC_FP32_MAXITER` cycles (default 160) is rerun from the same start in FP64, which
+   reproduces the FP64 result bit for bit. Cold FP32 grid: no convergence failures beyond production's own two; the
+   remaining gate failures are cycle counts (the restarted run, and `s12_C31_rms05` u3 100 K +15%). Opt-in; the caller
+   sets the variable (intended around warm-started calls). Open: whether FP32 can become the default for cold runs,
+   which needs the rate of different-SCF-solution outcomes under perturbed cold starts, FP32 vs FP64.
 2. Whether to push `diagonalization` and `diag/production` (local commits only; the three PRs in them are g8j39's,
    still open upstream), whether to hand `diag/production` over as the production library (after a Swift check), and
    whether to offer `sytrd.c` and the `mmompop` change upstream.

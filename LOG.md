@@ -306,3 +306,23 @@
   `SBROptions.recommended(n:fp32:manyProcesses:)`: t c s x, gemmWY for FP32 always and for FP64 alone or n < 700,
   b = 32 / 48 / 64 below 700 / 1500 / above. Regression through the driver: random n = 3–131, FP64 ≤ 4.6e-14, FP32
   ≤ 6.5e-6.
+- **Tridiagonal eigenvectors for the occupied orbitals only** (`scripts/kernels/tridiag_subset.c`,
+  `build/tridiag-subset.txt`, median of 3, 1 thread). xTB (`e7b0317`) already back-transforms only the occupied
+  columns (focc > 1e-16) during the SCC and the rest after convergence, but calls `xstedc('I')` for all n tridiagonal
+  vectors. Alternatives that return all eigenvalues and only vectors 1 … m are much slower: FP64 n = 412 / 776 / 1204
+  `dstedc` (all n) 3.6 / 13.3 / 29.6 ms, `dsterf` + MRRR `dstemr` for m = n/4 11.2 / 41.8 / 100.4 ms (n/2: 21 / 74 /
+  201); bisection + inverse iteration (`dstebz` + `dstein`) 53 ms at n = 412, m = n/4. FP32 likewise (`sstedc` 2.5 /
+  8.9 / 19.3 ms, `sstemr` n/4 8.7 / 29.5 / 75.6), and MRRR's FP32 orthogonality is 1e-4 vs 2e-6. Accelerate's divide
+  and conquer is fast on these spectra; not pursued.
+- **FP64 restart for FP32 SCC runs** (xtb `4d68074`): `scf` keeps the SCC's inputs while `XTB_SCC_FP32_RMSQ` is set
+  and, if a run that used FP32 doesn't converge within `XTB_SCC_FP32_MAXITER` cycles (default 160; converged
+  production runs need ≤ 130, median 37), reruns it from the same start with every eigensolve in FP64 (a full restart,
+  not a hand-off: the latch experiment showed continuing from an FP32-perturbed state doesn't rescue fragile runs).
+  `facet_bare_dimer` u0 300 K cold FP32 (didn't converge before): restarts, result bit-identical to FP64 (energy,
+  gradient, charges, eigenvalues), 2.05 vs 0.64 s. Grid with the variable unset (`build/ref-restart64`): 174/174
+  bit-identical to the `1c9a9c5` grid. Cold FP32 grid (`build/ref-restart32`, rmsq 1e-3): no convergence failures
+  beyond production's own two (`s12_C00` u3 and `facet_closed_rms15` u2 at 100 K); approx gates 175/177, both failures
+  cycle counts (the restarted run; `s12_C31_rms05` u3 100 K 107 → 123); worst E 1.6e-7 Eh, gradient 5.1e-5 Eh/bohr;
+  total cycles +1.8%. Opt-in only; the caller sets the variable around (warm-started) calls. Next: cold perturbation
+  study FP32 vs FP64 (rate of different SCF solutions), then rmsq thresholds and an early-abort rule, to decide whether
+  FP32 can be the default.
