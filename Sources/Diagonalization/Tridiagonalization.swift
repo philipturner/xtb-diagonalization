@@ -363,7 +363,8 @@ func sytd2Upper<T: TridiagonalScalar>(
 
 /// LAPACK dsytrd, UPLO = 'U', with ilaenv's defaults: block size 32, crossover 32. work holds at least n * 32.
 /// symmetric = false: A holds the full symmetric matrix and both triangles are updated (see the top of the file).
-@inline(__always)
+@_specialize(exported: true, where T == Double)
+@_specialize(exported: true, where T == Float)
 public func tridiagonalize<T: TridiagonalScalar>(
   _ n: Int, _ a: UnsafeMutablePointer<T>, _ lda: Int, _ d: UnsafeMutablePointer<T>, _ e: UnsafeMutablePointer<T>,
   _ tau: UnsafeMutablePointer<T>, _ work: UnsafeMutablePointer<T>, symmetric: Bool = true

@@ -291,10 +291,12 @@ Steps:
    cost of the extra copy. Not done: xTB's congruence (#1466) writes only the upper triangle, so it needs a mirrored,
    padded copy each cycle, and `dormtr` must read the padded matrix.
    Raw AMX programming is shelved unless this kind of gap turns out to matter.
-2. **End-to-end harness:** reduce → `dstedc` → back-transform m eigenvectors on the dumped GFN2 matrices, per-stage
+2. **End-to-end harness (done, `eigen-bench`):** reduce → `dstedc` → back-transform m eigenvectors on the dumped GFN2 matrices, per-stage
    times (the draft's breakdown); baselines: unsymmetrized and symmetric 1-stage + `dormtr`. Correctness: eigenvalues
    against `dsyevd`, residual ‖H Z − Z Λ‖, orthogonality ‖Zᵀ Z − I‖.
-3. **2-stage:** dense → band (trailing block only) and band → tridiagonal, both back-transformations; sweep b = 8–64.
+3. **2-stage:** dense → band and band → tridiagonal, both back-transformations; sweep b = 8–64. First version done
+   (2026-10-21, `Sources/Diagonalization/TwoStage.swift`, `eigen-bench`): accurate at every b, 1.9–2.1× the time of
+   the unsymmetrized 1-stage eigensolve at the best b (24–32), see `LOG.md`.
 4. **3-stage:** general band → band stage, configuration `[b1, b2]`; sweep (b1, b2).
 5. **Throughput:** jobs per second with 8 processes × 1 thread against the 1-stage reduction.
 6. **Block sizes first, then the deferred optimizations** (user, 2026-10-21). Get code that works, then:

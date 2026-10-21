@@ -169,3 +169,17 @@
   round-to-round noise), so the extra matrix isn't the problem: the full-matrix Accelerate kernels contend, probably
   on the AMX (one per cluster), where our NEON `symv` doesn't. Default switched back to `sym` (`xtb` commit after
   `26984c0`; 174/174 bit-identical to the earlier tip). Lesson for Phase 4: AMX-heavy kernels need the 8 × 1 check.
+- **Phase 4 steps 2–3, first 2-stage eigensolve** (Swift, FP64, `Sources/Diagonalization/TwoStage.swift`,
+  `Sources/EigenBench`): stage 1 dense → band by panel `geqrf` + `larft` + two `larfb` over the whole matrix; stage 2
+  bulge chasing (Schwarz, one reflector per bulge, plain loops, column order); `dstedc`; back-transformation of the
+  bulge reflectors blocked b sweeps at a time into (2b − 1) × b WY blocks (`larfb`; order checked: swapped pairs act on
+  disjoint rows), then the band panels (`larfb`). Development version per BRIEF: full matrix, no symmetry, whole-matrix
+  stage 1 updates. Accurate at every b = 4–64 on all four sizes: eigenvalues ≤ 2.8e-13 Eh from `dsyevd`, residual
+  ≤ 1e-15, orthogonality ≤ 5e-15. Time relative to the unsymmetrized 1-stage eigensolve (tridiagonal + `dstedc` +
+  `dormtr`), all eigenvectors, n = 412/448/619/776 (`build/eigen-bench-v1.0.txt`, median of 5): best b = 32,
+  2.11/2.36/2.12/2.05×; b = 16 2.46–3.09×, b = 64 2.48–3.15×. Half the eigenvectors (`-v0.5`): best b = 24–32,
+  1.87–2.13×. Stages at n = 776, b = 32, all vectors (ms): band 13.8 (1-stage tridiagonal: 19.8, despite ~3× redundant
+  work), bulge 24.4 (grows ∝ b), `dstedc` 13.3, bulge back-transformation 25.0 (`dormtr`: 7.4; twice the flops from the
+  half-empty 2b × b blocks, at ~75 vs ~125 GFLOPS), band back-transformation 6.2. The blocked bulge back-transformation
+  cut 18.3 → 5.0 ms at n = 412, b = 32 (unblocked reference kept, `--unblocked-bulges`); the column-order bulge update
+  11.5 → 7.1 ms. Rough relevant range so far: b = 16–48. Not yet checked: 8 × 1 throughput.

@@ -10,6 +10,7 @@ let package = Package(
     // Linked into libxtb.dylib in place of xtb/src/mctc/lapack/sytrd.c.
     .library(name: "Diagonalization", type: .static, targets: ["Diagonalization"]),
     .executable(name: "sytrd-bench", targets: ["SytrdBench"]),
+    .executable(name: "eigen-bench", targets: ["EigenBench"]),
   ],
   targets: [
     // The legacy Fortran-ABI BLAS/LAPACK symbols in Accelerate, the ones libxtb links (BLA_VENDOR=Apple).
@@ -24,6 +25,9 @@ let package = Package(
       swiftSettings: [.unsafeFlags(["-enforce-exclusivity=unchecked"])]),
     .executableTarget(
       name: "SytrdBench",
+      dependencies: ["CLAPACK", "Diagonalization"]),
+    .executableTarget(
+      name: "EigenBench",
       dependencies: ["CLAPACK", "Diagonalization"]),
   ]
 )

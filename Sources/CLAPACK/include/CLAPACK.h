@@ -50,6 +50,27 @@ void dsytrd_(const char *uplo, const lint *n, double *a, const lint *lda, double
 void ssytrd_(const char *uplo, const lint *n, float *a, const lint *lda, float *d, float *e, float *tau, float *work,
              const lint *lwork, lint *info);
 void dsterf_(const lint *n, double *d, double *e, lint *info);
+void dgeqrf_(const lint *m, const lint *n, double *a, const lint *lda, double *tau, double *work, const lint *lwork,
+             lint *info);
+void sgeqrf_(const lint *m, const lint *n, float *a, const lint *lda, float *tau, float *work, const lint *lwork,
+             lint *info);
+void dlarft_(const char *direct, const char *storev, const lint *n, const lint *k, const double *v, const lint *ldv,
+             const double *tau, double *t, const lint *ldt);
+void slarft_(const char *direct, const char *storev, const lint *n, const lint *k, const float *v, const lint *ldv,
+             const float *tau, float *t, const lint *ldt);
+void dlarfb_(const char *side, const char *trans, const char *direct, const char *storev, const lint *m,
+             const lint *n, const lint *k, const double *v, const lint *ldv, const double *t, const lint *ldt,
+             double *c, const lint *ldc, double *work, const lint *ldwork);
+void slarfb_(const char *side, const char *trans, const char *direct, const char *storev, const lint *m,
+             const lint *n, const lint *k, const float *v, const lint *ldv, const float *t, const lint *ldt, float *c,
+             const lint *ldc, float *work, const lint *ldwork);
+void dstedc_(const char *compz, const lint *n, double *d, double *e, double *z, const lint *ldz, double *work,
+             const lint *lwork, lint *iwork, const lint *liwork, lint *info);
+void dormtr_(const char *side, const char *uplo, const char *trans, const lint *m, const lint *n, const double *a,
+             const lint *lda, const double *tau, double *c, const lint *ldc, double *work, const lint *lwork,
+             lint *info);
+void dsyevd_(const char *jobz, const char *uplo, const lint *n, double *a, const lint *lda, double *w, double *work,
+             const lint *lwork, lint *iwork, const lint *liwork, lint *info);
 void ssterf_(const lint *n, float *d, float *e, lint *info);
 
 #endif
