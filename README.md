@@ -1,4 +1,6 @@
-# xtb-diagonalization
+# xTB Diagonalization
+
+> AI Disclaimer: This repo, and the contents of this README, were created with assistance of Claude Opus 5.5.
 
 Faster GFN2-xTB single points on Apple silicon, from faster per-SCC-cycle eigensolves. The xTB code is on the
 `diagonalization` branch of [philipturner/xtb](https://github.com/philipturner/xtb) (the `xtb/` submodule). This
