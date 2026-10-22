@@ -55,3 +55,32 @@ final class Progress {
     }
   }
 }
+
+/// A spinning barrier for a team of exactly `threads` workers that all run at once (tridiagonalizeParallel: about
+/// four per column of the reduction, too many for anything that sleeps). Traps after parallelStallSeconds.
+final class SpinBarrier {
+  let count = ManagedAtomic<Int>(0)
+  let generation = ManagedAtomic<Int>(0)
+  let threads: Int
+
+  init(threads: Int) { self.threads = threads }
+
+  @inline(__always)
+  func wait() {
+    let g = generation.load(ordering: .acquiring)
+    if count.loadThenWrappingIncrement(ordering: .acquiringAndReleasing) == threads - 1 {
+      count.store(0, ordering: .relaxed)
+      generation.store(g + 1, ordering: .releasing)
+      return
+    }
+    let start = DispatchTime.now().uptimeNanoseconds
+    var spins = 0
+    while generation.load(ordering: .acquiring) == g {
+      spins += 1
+      if spins & 1023 == 0 {
+        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start) * 1e-9
+        precondition(elapsed < parallelStallSeconds, "barrier stalled with \(threads) workers")
+      }
+    }
+  }
+}

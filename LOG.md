@@ -537,3 +537,33 @@
   **Next:** the reduction (serial sytrd) is now the largest part of the 8-thread eigensolve (n = 412 FP64: 3.0 of
   5.4 ms); a parallel reduction needs a persistent team rather than a parallel region per column. The 2-stage path
   becomes relevant above n ≈ 1600 in FP64.
+
+## 2026-10-22 (later): the reduction on a persistent OpenMP team (xtb `c04600e`)
+- **Team reduction in sytrd.c:** one parallel region per call, four spin barriers per dlatrd column (panel update by
+  rows → xlarfg on thread 0 → symv by columns of equal triangle area into per-thread vectors, panel_dots by rows →
+  sum, panel_update, scaling and partial dot by rows → axpy, same rows); the syr2k after each panel split by columns
+  (gemm above the diagonal blocks), the leading columns below 128 serial; at most 4 threads from n = 256. A spin
+  barrier costs ~0.1 µs at 4 threads, ~0.26 µs at 8 (measured by adding barriers). Kernel (`scripts/kernels/
+  sytrd_team.c`, `build/team/sytrd_team.txt`), 1 → 4 threads: FP64 n = 412 2.94 → 1.55 ms, 448 3.69 → 1.77, 619
+  9.61 → 4.69, 776 16.97 → 6.95, 1204 58.6 → 25.7, 1788 216.7 → 78.1 (1.9–2.8×); FP32 1.62 → 1.03, 2.10 → 1.13, 5.03
+  → 2.64, 8.31 → 3.94, 28.9 → 13.1, 91.5 → 38.8 (1.6–2.4×). 8 threads (6, 8 tried before the cap) were slower than 4:
+  barriers and data cross to the second cluster. Same bits for the same thread count.
+- Found along the way: at 4 threads the serial syr2k grew from 8.6 to 12.0 ms (n = 1204 FP64) next to spinning
+  siblings and became 40% of the reduction; splitting it by columns: 29.0 → 25.1 ms. Dynamic symv chunks (claimed by
+  atomic counter, summed in fixed order) cost 5–50% more (extra vectors, lost locality): dropped. Once, 4-thread runs
+  were bimodal (1.54 or 2.35 ms at n = 412); 16 later runs, with and without user-interactive QoS, were all fast
+  (likely background load).
+- **Gates** (`build/gates-team.sh`): 1 thread 192/192 identical to `d0691d6`; 4 threads FP64 phase2 177/177, tight
+  192/192 (|dE| ≤ 3.0e-12 Eh vs `d0691d6` at 4 threads). **FP32 approx fails on cycle counts:** 171/177 at 4 threads
+  (total +1.26%), 174/177 at 2, 175/177 at 3; all s12_C31 cases plus facet_dbpair_u0_T100 (41 → 46), +10–23% cycles,
+  with dE ≤ 1.9e-7, q ≤ 3.1e-5. The same s12_C31 family failed in earlier serial FP32 builds (`build/ref-fp32` 4,
+  `build/ref-api32` 2); FP32 eigenvalue errors vs FP64 are unchanged by the team (rms 3e-6 to 2e-5 Eh, serial and
+  team alike). Not decided: whether the FP32 path should keep the team.
+- **Swift mirror:** `tridiagonalizeParallel` (Tridiagonalization.swift, `symmetricColumns` split out of
+  `symmetricMatrixVector`), `SpinBarrier` (Parallel.swift), the exports `xtb_dsytrd_upper` / `xtb_ssytrd_upper` on
+  min(OpenMP threads, 4), eigen-bench variants "1-stage sym g jN team". Correct (n = 412: eigenvalues 2.7e-13 Eh,
+  residual 3.5e-16); not timed (machine busy).
+- **Not measured:** single-point latency with 8 threads (case B) for `c04600e`: mediaanalysisd at 67% of a core and
+  interactive use when it was due (`build/bench-team.sh` is ready: lib-team and lib-par interleaved). Throughput
+  (8 × 1) is unchanged by construction (1 thread = serial path, bit-identical).
+  **Next:** run `build/bench-team.sh` in a quiet window; decide the FP32 question; time the Swift team variant.

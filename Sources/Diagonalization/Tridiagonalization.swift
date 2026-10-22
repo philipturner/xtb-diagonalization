@@ -17,6 +17,7 @@
 // multiply-adds and not others (vectorized in-order reductions stay unfused), so those builds differ in rounding.
 import CLAPACK
 import CSIMD
+import Dispatch
 
 public protocol TridiagonalScalar: BinaryFloatingPoint, SIMDScalar {
   /// One NEON register: SIMD2<Double> or SIMD4<Float>.
@@ -231,16 +232,16 @@ private func symmetricDiagonalBlock<T: TridiagonalScalar>(
   }
 }
 
-/// y = alpha A x, A symmetric n x n, upper triangle, column-major with lda. For rows above each group of eight (then
-/// four) columns, every loaded A(i, j0..j0+7) feeds both y(i) += sum_c A(i,c) x(c) and the column dot products
-/// s_c += A(i,c) x(i), so the triangle is read once.
+/// y(0 ..< n) += the contributions of columns jbeg ..< n of the upper triangle of the symmetric A (jbeg a multiple of
+/// 8; rows 0 ..< n, column-major with lda). For rows above each group of eight (then four) columns, every loaded
+/// A(i, j0..j0+7) feeds both y(i) += sum_c A(i,c) x(c) and the column dot products s_c += A(i,c) x(i), so the
+/// triangle is read once.
 @inline(__always)
-public func symmetricMatrixVector<T: TridiagonalScalar>(
-  _ n: Int, _ alpha: T, _ A: UnsafePointer<T>, _ lda: Int, _ x: UnsafePointer<T>, _ y: UnsafeMutablePointer<T>
+func symmetricColumns<T: TridiagonalScalar>(
+  _ jbeg: Int, _ n: Int, _ A: UnsafePointer<T>, _ lda: Int, _ x: UnsafePointer<T>, _ y: UnsafeMutablePointer<T>
 ) {
   let w = T.Vector.scalarCount
-  for i in 0..<n { y[i] = 0 }
-  var j0 = 0
+  var j0 = jbeg
   // Eight columns per pass while they fit: each column's dot product is a chain of one fused multiply-add per vector
   // of rows (4-cycle latency), so eight chains keep the four FMA pipes busy where four can't (1.1-1.25x). Same bits as
   // two passes of four: rows above j0 see the eight columns in the same order, and the last four columns' rows
@@ -358,6 +359,15 @@ public func symmetricMatrixVector<T: TridiagonalScalar>(
     y[j0] += s + col[j0] * x[j0]
     j0 += 1
   }
+}
+
+/// y = alpha A x, A symmetric n x n, upper triangle, column-major with lda (symmetricColumns over all columns).
+@inline(__always)
+public func symmetricMatrixVector<T: TridiagonalScalar>(
+  _ n: Int, _ alpha: T, _ A: UnsafePointer<T>, _ lda: Int, _ x: UnsafePointer<T>, _ y: UnsafeMutablePointer<T>
+) {
+  for i in 0..<n { y[i] = 0 }
+  symmetricColumns(0, n, A, lda, x, y)
   if alpha != 1 {
     for i in 0..<n { y[i] *= alpha }
   }
@@ -605,4 +615,175 @@ public func tridiagonalize<T: TridiagonalScalar>(
     }
   }
   sytd2Upper(kk, a, lda, d, e, tau, symmetric)
+}
+
+/// Start of part t of 0 ..< length in `parts` parts, at multiples of 32 elements (whole cache lines).
+@inline(__always)
+private func teamRows(_ length: Int, _ t: Int, _ parts: Int) -> Int {
+  min(length, (length * t / parts + 31) / 32 * 32)
+}
+
+/// Start of the columns of part t of the upper triangle of order `length`: equal areas, multiples of 8.
+@inline(__always)
+private func teamColumns(_ length: Int, _ t: Int, _ parts: Int) -> Int {
+  if t == parts { return length }
+  return min(length, Int((Double(length) * (Double(t) / Double(parts)).squareRoot() / 8 + 0.5)) * 8)
+}
+
+/// dlatrd, UPLO = 'U', on worker t of a team of `threads` (sytrd.c's latrd_team): per column, the panel update of
+/// the column split by rows -> barrier -> larfg on worker 0 -> barrier -> symv split by columns (equal triangle
+/// areas) into one vector per worker, and panelDots split by rows -> barrier -> sum of the vectors, panelUpdate,
+/// scaling and the partial dot, split by rows -> barrier -> axpy, same rows (then the next column's panel update,
+/// same rows again: no barrier). W(i, iw + 1), which the next column's panel update reads as a coefficient while
+/// its owner updates it, is recomputed by every worker from a copy published before the last barrier.
+@inline(__always)
+func latrdUpperTeam<T: TridiagonalScalar>(
+  _ t: Int, _ threads: Int, _ n: Int, _ nb: Int, _ a: UnsafeMutablePointer<T>, _ lda: Int,
+  _ e: UnsafeMutablePointer<T>, _ tau: UnsafeMutablePointer<T>, _ w: UnsafeMutablePointer<T>, _ ldw: Int,
+  _ scratch: TeamScratch<T>, _ barrier: SpinBarrier
+) {
+  let ybuf = scratch.vectors, ldy = scratch.ldy, ubuf = scratch.dots, dbuf = scratch.partials
+  let shared = scratch.shared
+  withUnsafeTemporaryAllocation(of: T.self, capacity: 128) { local in
+    let wr = local.baseAddress!, ar = wr + 32, us = wr + 64
+    withUnsafeTemporaryAllocation(of: Int.self, capacity: threads + 1) { cend in
+      var wlast: T = 0  // the last column's W(i, iw + 1)
+      for i in stride(from: n, through: n - nb + 1, by: -1) {
+        let iw = i - n + nb
+        if i < n {
+          let m = n - i, r0 = teamRows(i, t, threads), r1 = teamRows(i, t + 1, threads)
+          wr[0] = wlast
+          ar[0] = a[at(i, i + 1, lda)]
+          for c in 1..<max(m, 1) {
+            wr[c] = w[at(i, iw + 1 + c, ldw)]
+            ar[c] = a[at(i, i + 1 + c, lda)]
+          }
+          if r1 > r0 {
+            panelUpdate(r1 - r0, m, a + at(1 + r0, i + 1, lda), lda, wr, w + at(1 + r0, iw + 1, ldw), ldw, ar,
+                        a + at(1 + r0, i, lda))
+          }
+        }
+        if i == 1 { break }
+        let im1 = i - 1, m = n - i
+        let v = a + at(1, i, lda), wc = w + at(1, iw, ldw)
+        barrier.wait()
+        if t == 0 {
+          T.larfg(im1, v + (i - 2), v, tau + (i - 2))
+          e[i - 2] = v[i - 2]
+          v[i - 2] = 1
+        }
+        barrier.wait()
+        for q in 0...threads { cend[q] = teamColumns(im1, q, threads) }
+        let c0 = cend[t], c1 = cend[t + 1], y = ybuf + t * ldy
+        for r in 0..<c1 { y[r] = 0 }
+        if c1 > c0 { symmetricColumns(c0, c1, a, lda, v, y) }
+        let r0 = teamRows(im1, t, threads), r1 = teamRows(im1, t + 1, threads)
+        let u = ubuf + t * 64
+        for c in 0..<m {
+          u[c] = 0
+          u[32 + c] = 0
+        }
+        if m > 0 && r1 > r0 {
+          panelDots(r1 - r0, m, w + at(1 + r0, iw + 1, ldw), ldw, a + at(1 + r0, i + 1, lda), lda, v + r0, u,
+                    u + 32)
+        }
+        barrier.wait()
+        for c in 0..<m {
+          var s1: T = 0, s2: T = 0
+          for q in 0..<threads {
+            s1 += ubuf[q * 64 + c]
+            s2 += ubuf[q * 64 + 32 + c]
+          }
+          us[c] = s1
+          us[32 + c] = s2
+        }
+        if t == 0 {
+          for c in 0..<m { w[at(i + 1 + c, iw, ldw)] = us[32 + c] }
+        }
+        for r in r0..<r1 {
+          var s: T = 0
+          for q in 0..<threads where r < cend[q + 1] { s += ybuf[q * ldy + r] }
+          wc[r] = s
+        }
+        if m > 0 && r1 > r0 {
+          panelUpdate(r1 - r0, m, a + at(1 + r0, i + 1, lda), lda, us, w + at(1 + r0, iw + 1, ldw), ldw, us + 32,
+                      wc + r0)
+        }
+        let taui = tau[i - 2]
+        var dot: T = 0
+        for r in r0..<r1 {
+          wc[r] *= taui
+          dot += wc[r] * v[r]
+        }
+        dbuf[t * 32] = dot
+        if r0 < im1 && im1 <= r1 { shared[0] = wc[im1 - 1] }
+        barrier.wait()
+        var sum: T = 0
+        for q in 0..<threads { sum += dbuf[q * 32] }
+        let alpha = -0.5 * taui * sum
+        for r in r0..<r1 { wc[r] = wc[r].addingProduct(alpha, v[r]) }
+        wlast = shared[0].addingProduct(alpha, v[im1 - 1])
+      }
+    }
+  }
+}
+
+/// Buffers shared by the team of tridiagonalizeParallel: one symv vector per worker (leading dimension ldy), the
+/// panel dot products per worker (64 apart), the partial dots (32 apart: one cache line each) and one shared value.
+struct TeamScratch<T: TridiagonalScalar> {
+  let vectors: UnsafeMutablePointer<T>, ldy: Int, dots: UnsafeMutablePointer<T>
+  let partials: UnsafeMutablePointer<T>, shared: UnsafeMutablePointer<T>
+}
+
+/// tridiagonalize (symmetric) on a team of `threads` workers (sytrd.c's sytrd_team): one concurrentPerform for the
+/// whole call, the workers synchronized by a SpinBarrier, four barriers per column (latrdUpperTeam); the syr2k after
+/// each panel split by columns of equal areas (gemm above the diagonal blocks); the leading columns below order 128
+/// serially (tridiagonalize). Same result up to rounding, the same bits for the same thread count; threads <= 1 or
+/// n < 256 is tridiagonalize itself. Swift never contracts, so this differs from sytrd.c (built with contraction) in
+/// rounding, as tridiagonalize does.
+@_specialize(exported: true, where T == Double)
+@_specialize(exported: true, where T == Float)
+public func tridiagonalizeParallel<T: TridiagonalScalar>(
+  _ n: Int, _ a: UnsafeMutablePointer<T>, _ lda: Int, _ d: UnsafeMutablePointer<T>, _ e: UnsafeMutablePointer<T>,
+  _ tau: UnsafeMutablePointer<T>, _ work: UnsafeMutablePointer<T>, threads: Int
+) {
+  let nb = 32, nx = 32, tail = 128
+  guard threads > 1, n >= 256 else {
+    tridiagonalize(n, a, lda, d, e, tau, work)
+    return
+  }
+  let kk = n - ((n - nx + nb - 1) / nb) * nb, ldy = (n + 31) / 32 * 32
+  var last = n - nb + 1  // first column of the last panel the team reduces
+  while last - nb >= kk + 1 && last - 1 >= tail { last -= nb }
+  let buffer = UnsafeMutablePointer<T>.allocate(capacity: threads * (ldy + 64 + 32) + 32)
+  defer { buffer.deallocate() }
+  let scratch = TeamScratch(
+    vectors: buffer, ldy: ldy, dots: buffer + threads * ldy, partials: buffer + threads * (ldy + 64),
+    shared: buffer + threads * (ldy + 96))
+  let barrier = SpinBarrier(threads: threads)
+  DispatchQueue.concurrentPerform(iterations: threads) { t in
+    for i in stride(from: n - nb + 1, through: last, by: -nb) {
+      let im1 = i - 1
+      latrdUpperTeam(t, threads, i + nb - 1, nb, a, lda, e, tau, work, n, scratch, barrier)
+      barrier.wait()
+      // columns c0 ..< c1 of the update, equal areas
+      let c0 = teamColumns(im1, t, threads), c1 = teamColumns(im1, t + 1, threads), nc = c1 - c0
+      let v = a + at(1, i, lda)
+      if c0 > 0 && nc > 0 {
+        T.gemm("N", "T", c0, nc, nb, -1, v, lda, work + c0, n, 1, a + c0 * lda, lda)
+        T.gemm("N", "T", c0, nc, nb, -1, work, n, v + c0, lda, 1, a + c0 * lda, lda)
+      }
+      if nc > 0 { T.syr2k(nc, nb, -1, v + c0, lda, work + c0, n, a + c0 + c0 * lda, lda) }
+      barrier.wait()
+      if t == 0 {
+        for j in i...(i + nb - 1) {
+          a[at(j - 1, j, lda)] = e[j - 2]
+          d[j - 1] = a[at(j, j, lda)]
+        }
+      }
+      barrier.wait()
+    }
+  }
+  // the leading last - 1 columns, serially
+  tridiagonalize(last - 1, a, lda, d, e, tau, work)
 }
