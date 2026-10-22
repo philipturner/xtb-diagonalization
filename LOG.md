@@ -443,3 +443,9 @@
   57.44, 1204 b = 48 39.81 → 35.23 / 181.94 → 176.90, 1788 b = 64 109.49 → 98.86 / 500.73 → 489.89; FP32 412 2.89 →
   2.49, 619 6.55 → 5.67, 776 11.85 → 9.96, 1204 28.52 → 24.00, 1788 73.68 → 63.10. Chase 10–17% faster, total 2–5%.
   The diagonal triangle (~1/5 of the chase's memory operations) is still one column per pass. `recommended()` adds `q`.
+- **Eight columns per pass (`octChase`, `o`, with `q`).** 8 is the practical maximum: ~17 of the 32 NEON registers
+  per kernel (16 columns would spill), and each doubling saves less (shared-vector traffic per column element 4 → 8:
+  dot 1.25 → 1.125, axpy 2.25 → 2.125, gemv 1.5 → 1.25). Accuracy: random n = 5–131, FP64 ≤ 5.0e-14, FP32 ≤ 6.6e-6.
+  Chase, 4 → 8 columns, ms (`build/octchase.txt`, median of 9): FP64 n = 412 3.04 → 2.81, 619 6.92 → 6.46, 776 14.55
+  → 13.55, 1204 35.67 → 33.03, 1788 99.84 → 92.10; FP32 2.50 → 2.30, 5.67 → 5.16, 9.99 → 9.23, 23.94 → 22.29, 63.63
+  → 59.25 (7–9%); totals 1–3% (FP64 n = 1204 180.74 → 174.30). `recommended()` adds `o`.

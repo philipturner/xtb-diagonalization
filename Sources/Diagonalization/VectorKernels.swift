@@ -156,3 +156,84 @@ func vectorGemv4<Real: BandReductionScalar>(
     i += 1
   }
 }
+
+// Eight columns per pass: about 17 of the 32 NEON registers, no spills (sixteen would spill).
+
+/// (x . c[0], ..., x . c[7]) over n elements, c[j] = c0 + j ldc.
+@inline(__always)
+func vectorDot8<Real: BandReductionScalar>(
+  _ n: Int, _ x: UnsafePointer<Real>, _ c0: UnsafePointer<Real>, _ ldc: Int
+) -> SIMD8<Real> {
+  let w = Real.Vector.scalarCount
+  var a0 = Real.Vector(), a1 = Real.Vector(), a2 = Real.Vector(), a3 = Real.Vector()
+  var a4 = Real.Vector(), a5 = Real.Vector(), a6 = Real.Vector(), a7 = Real.Vector()
+  var i = 0
+  while i + w <= n {
+    let xv = load(x + i), c = c0 + i
+    a0 = Real.fma(a0, xv, load(c)); a1 = Real.fma(a1, xv, load(c + ldc))
+    a2 = Real.fma(a2, xv, load(c + 2 * ldc)); a3 = Real.fma(a3, xv, load(c + 3 * ldc))
+    a4 = Real.fma(a4, xv, load(c + 4 * ldc)); a5 = Real.fma(a5, xv, load(c + 5 * ldc))
+    a6 = Real.fma(a6, xv, load(c + 6 * ldc)); a7 = Real.fma(a7, xv, load(c + 7 * ldc))
+    i += w
+  }
+  var s = SIMD8<Real>(
+    Real.horizontalSum(a0), Real.horizontalSum(a1), Real.horizontalSum(a2), Real.horizontalSum(a3),
+    Real.horizontalSum(a4), Real.horizontalSum(a5), Real.horizontalSum(a6), Real.horizontalSum(a7))
+  while i < n {
+    for j in 0..<8 { s[j] += x[i] * c0[i + j * ldc] }
+    i += 1
+  }
+  return s
+}
+
+/// c[j] += a[j] x for the eight columns c[j] = c0 + j ldc, over n elements.
+@inline(__always)
+func vectorAxpy8<Real: BandReductionScalar>(
+  _ n: Int, _ a: SIMD8<Real>, _ x: UnsafePointer<Real>, _ c0: UnsafeMutablePointer<Real>, _ ldc: Int
+) {
+  let w = Real.Vector.scalarCount
+  let v0 = Real.Vector(repeating: a[0]), v1 = Real.Vector(repeating: a[1])
+  let v2 = Real.Vector(repeating: a[2]), v3 = Real.Vector(repeating: a[3])
+  let v4 = Real.Vector(repeating: a[4]), v5 = Real.Vector(repeating: a[5])
+  let v6 = Real.Vector(repeating: a[6]), v7 = Real.Vector(repeating: a[7])
+  var i = 0
+  while i + w <= n {
+    let xv = load(x + i), c = c0 + i
+    store(Real.fma(load(c), v0, xv), c); store(Real.fma(load(c + ldc), v1, xv), c + ldc)
+    store(Real.fma(load(c + 2 * ldc), v2, xv), c + 2 * ldc); store(Real.fma(load(c + 3 * ldc), v3, xv), c + 3 * ldc)
+    store(Real.fma(load(c + 4 * ldc), v4, xv), c + 4 * ldc); store(Real.fma(load(c + 5 * ldc), v5, xv), c + 5 * ldc)
+    store(Real.fma(load(c + 6 * ldc), v6, xv), c + 6 * ldc); store(Real.fma(load(c + 7 * ldc), v7, xv), c + 7 * ldc)
+    i += w
+  }
+  while i < n {
+    for j in 0..<8 { c0[i + j * ldc] += a[j] * x[i] }
+    i += 1
+  }
+}
+
+/// y += sum_j a[j] c[j] for the eight columns c[j] = c0 + j ldc, over n elements.
+@inline(__always)
+func vectorGemv8<Real: BandReductionScalar>(
+  _ n: Int, _ y: UnsafeMutablePointer<Real>, _ c0: UnsafePointer<Real>, _ ldc: Int, _ a: SIMD8<Real>
+) {
+  let w = Real.Vector.scalarCount
+  let v0 = Real.Vector(repeating: a[0]), v1 = Real.Vector(repeating: a[1])
+  let v2 = Real.Vector(repeating: a[2]), v3 = Real.Vector(repeating: a[3])
+  let v4 = Real.Vector(repeating: a[4]), v5 = Real.Vector(repeating: a[5])
+  let v6 = Real.Vector(repeating: a[6]), v7 = Real.Vector(repeating: a[7])
+  var i = 0
+  while i + w <= n {
+    let c = c0 + i
+    var yv = load(y + i)
+    yv = Real.fma(yv, v0, load(c)); yv = Real.fma(yv, v1, load(c + ldc))
+    yv = Real.fma(yv, v2, load(c + 2 * ldc)); yv = Real.fma(yv, v3, load(c + 3 * ldc))
+    yv = Real.fma(yv, v4, load(c + 4 * ldc)); yv = Real.fma(yv, v5, load(c + 5 * ldc))
+    yv = Real.fma(yv, v6, load(c + 6 * ldc)); yv = Real.fma(yv, v7, load(c + 7 * ldc))
+    store(yv, y + i)
+    i += w
+  }
+  while i < n {
+    for j in 0..<8 { y[i] += a[j] * c0[i + j * ldc] }
+    i += 1
+  }
+}

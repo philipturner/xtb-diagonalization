@@ -35,7 +35,8 @@ public func chaseBulges<Real: BandReductionScalar>(
   if options.symmetricChase {
     guard options.compactBand, b > 1 else {
       chaseBulgesLower(n, b, a, lda, v2, d, e, work, vector: options.vectorChase,
-                       quad: options.vectorChase && options.quadChase)
+                       quad: options.vectorChase && options.quadChase,
+                       oct: options.vectorChase && options.quadChase && options.octChase)
       return
     }
     // The lower band (diagonals 0 ... b) into band storage, diagonals b + 1 ... 2b zero.
@@ -47,7 +48,8 @@ public func chaseBulges<Real: BandReductionScalar>(
       for i in band..<rows { dst[i] = 0 }
     }
     chaseBulgesLower(n, b, ab, ldab, v2, d, e, work + (2 * b + 1) * n, vector: options.vectorChase,
-                     quad: options.vectorChase && options.quadChase)
+                     quad: options.vectorChase && options.quadChase,
+                     oct: options.vectorChase && options.quadChase && options.octChase)
     return
   }
   let x = work               // the column segment to annihilate (b)
@@ -114,11 +116,12 @@ public func chaseBulges<Real: BandReductionScalar>(
 ///   rows and columns R             A_RR = H A_RR H = A_RR - w q^T - q w^T, p = A_RR w, q = p - (w^T p) w / 2
 /// which is about half the arithmetic and memory traffic of updating both triangles with left and right products.
 /// vector (SBROptions.vectorChase): every loop by the explicit fused multiply-add kernels of VectorKernels.swift.
-/// quad (SBROptions.quadChase, with vector): the left and below blocks four columns per pass.
+/// quad (SBROptions.quadChase, with vector): the left and below blocks four columns per pass; oct
+/// (SBROptions.octChase, with quad): eight, the rest by four and one.
 func chaseBulgesLower<Real: BandReductionScalar>(
   _ n: Int, _ b: Int, _ a: UnsafeMutablePointer<Real>, _ lda: Int, _ v2: UnsafeMutablePointer<Real>,
   _ d: UnsafeMutablePointer<Real>, _ e: UnsafeMutablePointer<Real>, _ work: UnsafeMutablePointer<Real>,
-  vector: Bool = false, quad: Bool = false
+  vector: Bool = false, quad: Bool = false, oct: Bool = false
 ) {
   let x = work, y = work + b, p = y + 2 * b
   if b > 1 {
@@ -141,6 +144,14 @@ func chaseBulgesLower<Real: BandReductionScalar>(
           let lo = max(rs - b, 0), hi = min(re + b, n)
           // Columns lo ..< rs, rows R.
           var j0 = lo
+          if oct {
+            while j0 + 8 <= rs {
+              let c0 = a + offset(rs, j0, lda)
+              let d = vectorDot8(len, w, c0, lda)
+              vectorAxpy8(len, -d, w, c0, lda)
+              j0 += 8
+            }
+          }
           if quad {
             // Four columns per pass: w loaded once for all four.
             while j0 + 4 <= rs {
@@ -161,6 +172,14 @@ func chaseBulgesLower<Real: BandReductionScalar>(
             // Four columns per pass: y loaded and stored once for all four.
             for i in 0..<below { y[i] = 0 }
             var jj = 0
+            if oct {
+              while jj + 8 <= len {
+                let c0 = a + offset(re, rs + jj, lda)
+                vectorGemv8(below, y, c0, lda, SIMD8(w[jj], w[jj + 1], w[jj + 2], w[jj + 3],
+                                                    w[jj + 4], w[jj + 5], w[jj + 6], w[jj + 7]))
+                jj += 8
+              }
+            }
             while jj + 4 <= len {
               let c0 = a + offset(re, rs + jj, lda), c1 = c0 + lda, c2 = c1 + lda, c3 = c2 + lda
               vectorGemv4(below, y, c0, c1, c2, c3, w[jj], w[jj + 1], w[jj + 2], w[jj + 3])
@@ -168,6 +187,14 @@ func chaseBulgesLower<Real: BandReductionScalar>(
             }
             for j in jj..<len { vectorAxpy(below, w[j], a + offset(re, rs + j, lda), y) }
             jj = 0
+            if oct {
+              while jj + 8 <= len {
+                let c0 = a + offset(re, rs + jj, lda)
+                vectorAxpy8(below, -SIMD8(w[jj], w[jj + 1], w[jj + 2], w[jj + 3],
+                                          w[jj + 4], w[jj + 5], w[jj + 6], w[jj + 7]), y, c0, lda)
+                jj += 8
+              }
+            }
             while jj + 4 <= len {
               let c0 = a + offset(re, rs + jj, lda), c1 = c0 + lda, c2 = c1 + lda, c3 = c2 + lda
               vectorAxpy4(below, -w[jj], -w[jj + 1], -w[jj + 2], -w[jj + 3], y, c0, c1, c2, c3)
