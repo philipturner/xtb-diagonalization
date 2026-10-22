@@ -13,7 +13,11 @@ swift build --package-path "$ROOT" -c release --product Diagonalization --disabl
 SWIFTLIB="$ROOT/.build/release/libDiagonalization.a"
 SDK=$(xcrun --show-sdk-path)
 # The Swift objects ask for their runtime libraries by name (-lswiftCore, ...); these are the directories to find them.
-LIBS="$SWIFTLIB;-L$SDK/usr/lib/swift;-L/usr/lib/swift"
+# swift-atomics is built for an older macOS than this package, so its objects also reference the toolchain's static
+# back-deployment libraries, which only swiftc's driver adds by itself.
+TOOLCHAIN_LIB="$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx"
+LIBS="$SWIFTLIB;-L$SDK/usr/lib/swift;-L/usr/lib/swift;$TOOLCHAIN_LIB/libswiftCompatibility56.a"
+LIBS="$LIBS;$TOOLCHAIN_LIB/libswiftCompatibilityConcurrency.a"
 cmake -S "$SRC" -B "$BUILD" \
  -DCMAKE_BUILD_TYPE=Release \
  -DCMAKE_C_COMPILER="gcc-16" \

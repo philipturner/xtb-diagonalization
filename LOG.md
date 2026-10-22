@@ -513,3 +513,27 @@
 - **Bug found by AddressSanitizer:** xlaed2 stores deflated eigenvectors in Q2 with leading dimension n, past the
   documented n1² + n2² (FP32 n = 1788 crashed intermittently); Q2 is now n² as dlaed1 sizes it. The parallel path calls
   Accelerate's `$NEWLAPACK` symbols (documented thread-safe).
+- **Into xTB: the eigensolve on the caller's OpenMP threads** (xtb `d0691d6`): `xtb_dstedc` / `xtb_sstedc` (C port
+  of the parallel D&C as OpenMP tasks; xstedc itself with one thread) and the gemm back-transformation in two column
+  blocks on two threads; CMake links OpenMP for C. The thread count is the calling thread's `omp_get_max_threads()`,
+  so swift-xtb's `threadCount` applies. Gates: 1 thread 192/192 bit-identical to `c12de28`; 4 threads per run FP64
+  phase2 177/177, tight 192/192 (|dE| ≤ 8.5e-12 Eh), FP32 approx 177/177 (cycles +0.29%). Tried and dropped: the
+  symmetric matrix-vector product of the reduction on 2–4 OpenMP threads (a parallel region per column: n = 412 FP64
+  3.02 → 6.91 ms; only n = 1788 FP64 −3%). Swift-linked libxtb: exports added, `build_xtb_swift.sh` links Swift's
+  back-deployment libraries (swift-atomics needs them); same results as the C library to 2.8e-13 Eh at 4 threads.
+- **The two benchmark cases** (`scripts/bench_cases.sh`, `scripts/cases_table.py`, `build/cases/`; cold single points,
+  thread variables set at launch, VECLIB_MAXIMUM_THREADS=1; FP32 = SCC precision API rmsq 1e-3). Libraries: prod (the
+  renderer's), `e2e5bee` (yesterday morning's tip), `d0691d6`. The first 8-thread pass ran with mediaanalysisd at 50–65%
+  of a core (kept in `build/cases/loaded/`); the latency numbers below are a clean rerun.
+  - **Throughput, 8 processes × 1 thread** (jobs/s; vs prod FP64): n = 412 prod 9.28, `d0691d6` FP64 16.33 (1.76×),
+    FP32 **20.44 (2.20×)**; 619 2.13 / 4.02 (1.89×) / **4.82 (2.26×)**; 776 2.33 / 4.49 (1.93×) / **5.25 (2.25×)**; 1204
+    0.248 / 0.447 (1.80×) / **0.637 (2.56×)**. Today's steps over `e2e5bee`: +4–9% FP64, +8–14% FP32.
+  - **Latency, one SCF with 8 OpenMP threads** (s; vs prod with 1 thread): n = 412 prod 0.566 (prod 8 threads
+    0.422), `d0691d6` FP64 0.235 (2.41×), FP32 **0.196 (2.88×)**; 448 1.073 / 0.504 / **0.404 (2.66×)**; 619 2.175 /
+    0.954 / **0.812 (2.68×)**; 776 2.347 / 0.787 / **0.649 (3.62×)**; 1204 15.19 / 6.45 / **5.03 (3.02×)**; 1788 72.73 /
+    31.47 / **22.22 (3.27×)**. Against prod with the same 8 threads, FP32 is 2.15–3.04× faster.
+  - The 2-stage path isn't in xTB: as an eigensolve alone it wins only at FP64 n ≈ 1788 (see above), and its 8-thread
+    form loses to the parallel 1-stage at every size in the target range.
+  **Next:** the reduction (serial sytrd) is now the largest part of the 8-thread eigensolve (n = 412 FP64: 3.0 of
+  5.4 ms); a parallel reduction needs a persistent team rather than a parallel region per column. The 2-stage path
+  becomes relevant above n ≈ 1600 in FP64.
