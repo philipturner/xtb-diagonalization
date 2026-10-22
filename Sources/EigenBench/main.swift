@@ -20,8 +20,8 @@
 // only, c combined (sy2sb) update, l lower triangle, s symmetric chase, p parallelogram back-transformation, kN column
 // blocks of N, g compact WY blocks by three gemm calls instead of larfb, vN bulge back-transformation blocks of N
 // sweeps (default b), b band storage and x vector kernels for the symmetric chase, u (with l) the lower update by gemm
-// blocks instead of syr2k, q (with x) the chase's left and below blocks four columns per pass, o (with q) eight. With p
-// or k the bulge blocks are precomputed (stage "prep"); otherwise each is built just before it's applied
+// blocks instead of syr2k, q (with x) the chase's left and below blocks four columns per pass, o eight (implies q).
+// With p or k the bulge blocks are precomputed (stage "prep"); otherwise each is built just before it's applied
 // (backTransformBulgesBlocked), which is faster for one thread.
 // --procs P [--jobs K]: throughput instead of latency. For each variant, P copies of this program (one file only)
 // start together and each runs the variant K times (default 20) after a warm-up; reports jobs per second as a work

@@ -24,7 +24,8 @@ public struct SBROptions {
   /// With vectorChase: the chase's left and below blocks four columns per pass (the shared vector loaded once for
   /// all four).
   public var quadChase = false
-  /// With quadChase: eight columns per pass (about 17 of the 32 NEON registers), the remaining columns by four and one.
+  /// With vectorChase: eight columns per pass (about 17 of the 32 NEON registers), then four for a remainder of 4-7
+  /// columns, then one. Implies quadChase.
   public var octChase = false
   /// Bulge back-transformation with triangular products at both ends of each parallelogram block (larfb treats the
   /// lower (b - 1) x b part as dense, though half of it is zero). Uses the precomputed blocks (prepareBulgeBlocks).
