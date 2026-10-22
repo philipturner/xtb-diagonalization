@@ -584,12 +584,13 @@
 ## 2026-10-22 (later): swift-xtb side branch, macOS only
 - The user paused the Windows port. `HANDOFF-WINDOWS.md` (8924cd7) removed; it's in history if Windows resumes (on
   x86 the team reduction is compiled out; sytrd.c was syntax-checked for x86_64 only).
-- **xtb `swift-xtb-2026-diagonalization`** (`a02c0a5`, local, not pushed): `diagonalization` (d6c5552) merged with
-  `swift-xtb-2026` (two GFN-FF patches: no `gfnff_topo` / `gfnff_charges` written, no `.CHRG` / `charges` read).
-  `diagonalization` itself stays free of them (upstream-bound). Built as production (CMake, GCC 16, Accelerate,
-  OpenMP for C and Fortran): `build/xtb-build-s26d`.
-- **swift-xtb `fp32-diagonalization`** (`d56e98a`, clone in `build/swift-xtb-fp32`, not pushed): `compile-macos.sh`
-  clones that xtb branch; the Windows script still builds `swift-xtb-2026`. With the local build installed
-  relocatable (`build/install-swift-xtb-lib2.sh LIB DEST`): `bash test.sh` 20/20 pass (FP32 precision and GFN-FF
-  tests included), no stray files. For the script to work as committed, the user pushes the xtb branch
-  `swift-xtb-2026-diagonalization` and swift-xtb `fp32-diagonalization`.
+- **One branch** (user's call: a separate integration branch would need constant syncing): `swift-xtb-2026` (two
+  GFN-FF patches: no `gfnff_topo` / `gfnff_charges` written, no `.CHRG` / `charges` read) merged into
+  `diagonalization` (xtb `03ae163`); the interim branch `swift-xtb-2026-diagonalization` (a02c0a5, never pushed) is
+  deleted, same tree. `diagonalization` isn't a clean upstream candidate anyway: the user plans a GitHub issue with the
+  results, no pull requests for now (anything upstream would be factored out separately).
+- **swift-xtb `fp32-diagonalization`** (`f795fb4`, clone in `build/swift-xtb-fp32`, not pushed): `compile-macos.sh`
+  clones xtb `diagonalization`; the Windows script still builds `swift-xtb-2026`. Built as production (CMake, GCC 16,
+  Accelerate, OpenMP for C and Fortran: `build/xtb-build-s26d`, same tree) and installed relocatable
+  (`build/install-swift-xtb-lib2.sh LIB DEST`): `bash test.sh` 20/20 pass (FP32 precision and GFN-FF tests
+  included), no stray files. The user pushes xtb `diagonalization` and swift-xtb `fp32-diagonalization`.
