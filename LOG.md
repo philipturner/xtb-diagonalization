@@ -449,3 +449,27 @@
   Chase, 4 → 8 columns, ms (`build/octchase.txt`, median of 9): FP64 n = 412 3.04 → 2.81, 619 6.92 → 6.46, 776 14.55
   → 13.55, 1204 35.67 → 33.03, 1788 99.84 → 92.10; FP32 2.50 → 2.30, 5.67 → 5.16, 9.99 → 9.23, 23.94 → 22.29, 63.63
   → 59.25 (7–9%); totals 1–3% (FP64 n = 1204 180.74 → 174.30). `recommended()` adds `o`.
+- **Audit of the 1-stage path for remaining wins** (2026-10-21 evening). Profile of `xtb_dsytrd_upper`
+  (`scripts/kernels/sytrd_profile.c`, every Accelerate call timed): the NEON symv and loops are 58–70%, gemv 'N'
+  12–20%, gemv 'T' 7–13%, dsyr2k 4–10%, dlarfg 1–2%. The symv ran at the latency bound of its column dot products (one
+  FMA chain per column, ~3.9 cycles per vector of rows). **Eight columns per pass** (`symv8.c`; xtb `658c9e3`, Swift
+  `symmetricMatrixVector` mirrored): same bits (192/192 grid identical, cycles 8291 → 8291; Swift = C on four dumps),
+  kernel 1.11–1.25×, reduction FP64 3.66 → 3.35 / 4.47 → 4.24 / 11.24 → 10.23 / 20.12 → 17.98 ms (n = 412/448/619/776),
+  FP32 2.15 → 1.90 / 2.61 → 2.36 / 6.29 → 5.62 / 10.38 → 8.93. **Back-transformation by gemm** (`ormtr_gemm.c`; xtb
+  `58db33d`, `xtb_dormtr_upper` / `xtb_sormtr_upper` at every ormtr call site; Swift `backTransformTridiagonal`,
+  exports, eigen-bench variant `1-stage sym g`): xormql's 32-reflector blocks by three gemm calls with V^T stored
+  explicitly. The transpose state mattered: V^T Z as gemm 'T','N' gave 1.10× over dormtr, 'N','N' on the copy
+  1.28–1.34× FP64 (FP32 1.22–1.51×); padding leading dimensions changed nothing; nb = 64 similar. 8 × 1: FP64
+  1.19–1.25×, FP32 1.07–1.21×. Gates: FP64 phase2 177/177, tight 192/192 (|dE| ≤ 4.4e-12 Eh); FP32 1e-3 approx 176/177
+  (one cycle count, `s12_C31_rms15_u3` 100 K 92 → 103, limit 101; the e2e5bee grid's two failures pass; cycles +0.50%
+  vs +1.83%). Swift-linked build links and matches the C build to 2.8e-13 Eh. **Single points** (cold, 1 thread,
+  median of 3 alternating rounds, `build/sp-*.json`), both steps vs e2e5bee: facet_closed −2.7%, s12_C31 −5.0%,
+  facet_dbpair_tool −3.9%, s3_S42_159 −3.2%, diamond233 −7.7% (symv alone −0.9 to −5.3%).
+  Checked, no gain: gemm blocks instead of dsyr2k in sytrd (`sytrd_syr2k.c`: the following symv 1–3% faster but
+  the update slower, net 0.89–1.015×); congruence's trmm 'L','U','T' (`congruence.c`): dense gemm on a stored X^T
+  saves 12–17% of the congruence, 0.1–0.6 ms per cycle, not done; final trmm already 205–258 GF/s. Swift hot paths
+  are fully specialized (the only calls are Accelerate's and bzero); build flags -O3 with GCC's default
+  -mcpu=apple-m1; eigensolver workspaces persist across cycles. Outside the eigensolve no stage exceeds ~6%.
+  **Next candidate:** `dstedc` is now ~45% of the 1-stage eigensolve and its top merge is 40–46% of it
+  (`stedc_split.c`, random matrices); an own top merge (halves by dstedc, deflation and secular equation by LAPACK's
+  dlaed routines) could form only the m occupied columns. Also open: fused panel gemvs in latrd (gemv 12–20%).

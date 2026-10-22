@@ -33,6 +33,27 @@ public func xtb_dsytrd_full(
   tridiagonalize(Int(n.pointee), a, Int(lda.pointee), d, e, tau, work, symmetric: false)
 }
 
+/// Fortran: call xtb_dormtr_upper(n, m, a, lda, tau, z, ldz, work): z = Q z for m columns, Q from xtb_dsytrd_upper
+/// (dormtr 'L', 'U', 'N' by gemm), work of size 32 * (2 * n + 2 * m + 32)
+@_cdecl("xtb_dormtr_upper")
+public func xtb_dormtr_upper(
+  _ n: UnsafePointer<Int32>, _ m: UnsafePointer<Int32>, _ a: UnsafePointer<Double>, _ lda: UnsafePointer<Int32>,
+  _ tau: UnsafePointer<Double>, _ z: UnsafeMutablePointer<Double>, _ ldz: UnsafePointer<Int32>,
+  _ work: UnsafeMutablePointer<Double>
+) {
+  backTransformTridiagonal(Int(n.pointee), Int(m.pointee), a, Int(lda.pointee), tau, z, Int(ldz.pointee), work)
+}
+
+/// Fortran: call xtb_sormtr_upper(n, m, a, lda, tau, z, ldz, work): as xtb_dormtr_upper, Q from xtb_ssytrd_upper
+@_cdecl("xtb_sormtr_upper")
+public func xtb_sormtr_upper(
+  _ n: UnsafePointer<Int32>, _ m: UnsafePointer<Int32>, _ a: UnsafePointer<Float>, _ lda: UnsafePointer<Int32>,
+  _ tau: UnsafePointer<Float>, _ z: UnsafeMutablePointer<Float>, _ ldz: UnsafePointer<Int32>,
+  _ work: UnsafeMutablePointer<Float>
+) {
+  backTransformTridiagonal(Int(n.pointee), Int(m.pointee), a, Int(lda.pointee), tau, z, Int(ldz.pointee), work)
+}
+
 /// Fortran: call xtb_dsymmetrize_pad(n, src, lds, dst, ldd): dst(1:n, 1:n) = the symmetric matrix whose upper
 /// triangle is src's (src's lower triangle is not read), in 32 x 32 tiles
 @_cdecl("xtb_dsymmetrize_pad")

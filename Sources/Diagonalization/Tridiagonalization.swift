@@ -1,7 +1,7 @@
 // Reduction of a symmetric matrix (upper triangle) to tridiagonal form: LAPACK's blocked dsytrd (dlatrd panels of 32
 // columns + dsyr2k, dsytd2 for the last block), a line-by-line port of xtb/src/mctc/lapack/sytrd.c. The output
 // (Householder vectors in A, tau) is what dormtr expects. The only change from LAPACK: the symmetric matrix-vector
-// product, the BLAS2 core of the reduction, is a vectorized kernel that reads the triangle once for four columns at
+// product, the BLAS2 core of the reduction, is a vectorized kernel that reads the triangle once for eight columns at
 // a time. Everything else calls Accelerate's legacy BLAS/LAPACK.
 //
 // symmetric = false is the same reduction without exploiting symmetry: the full matrix (both triangles) is read and
@@ -215,8 +215,23 @@ private func store<T: TridiagonalScalar>(_ v: T.Vector, _ p: UnsafeMutablePointe
   UnsafeMutableRawPointer(p).storeBytes(of: v, as: T.Vector.self)
 }
 
-/// y = alpha A x, A symmetric n x n, upper triangle, column-major with lda. For rows above each group of four
-/// columns, every loaded A(i, j0..j0+3) feeds both y(i) += sum_c A(i,c) x(c) and the column dot products
+/// symmetricMatrixVector's 4 x 4 diagonal block at column j0 (upper triangle).
+@inline(__always)
+private func symmetricDiagonalBlock<T: TridiagonalScalar>(
+  _ j0: Int, _ A: UnsafePointer<T>, _ lda: Int, _ x: UnsafePointer<T>, _ y: UnsafeMutablePointer<T>
+) {
+  for c in 0..<4 {
+    let col = A + (j0 + c) * lda
+    for r in 0..<c {
+      y[j0 + r] += col[j0 + r] * x[j0 + c]
+      y[j0 + c] += col[j0 + r] * x[j0 + r]
+    }
+    y[j0 + c] += col[j0 + c] * x[j0 + c]
+  }
+}
+
+/// y = alpha A x, A symmetric n x n, upper triangle, column-major with lda. For rows above each group of eight (then
+/// four) columns, every loaded A(i, j0..j0+7) feeds both y(i) += sum_c A(i,c) x(c) and the column dot products
 /// s_c += A(i,c) x(i), so the triangle is read once.
 @inline(__always)
 public func symmetricMatrixVector<T: TridiagonalScalar>(
@@ -225,6 +240,74 @@ public func symmetricMatrixVector<T: TridiagonalScalar>(
   let w = T.Vector.scalarCount
   for i in 0..<n { y[i] = 0 }
   var j0 = 0
+  // Eight columns per pass while they fit: each column's dot product is a chain of one fused multiply-add per vector
+  // of rows (4-cycle latency), so eight chains keep the four FMA pipes busy where four can't (1.1-1.25x). Same bits as
+  // two passes of four: rows above j0 see the eight columns in the same order, and the last four columns' rows
+  // j0 ..< j0 + 4 follow the first four's diagonal block, as they would.
+  while j0 + 8 <= n {
+    let c0 = A + j0 * lda, c1 = c0 + lda, c2 = c1 + lda, c3 = c2 + lda
+    let c4 = c3 + lda, c5 = c4 + lda, c6 = c5 + lda, c7 = c6 + lda
+    let x0 = T.Vector(repeating: x[j0]), x1 = T.Vector(repeating: x[j0 + 1])
+    let x2 = T.Vector(repeating: x[j0 + 2]), x3 = T.Vector(repeating: x[j0 + 3])
+    let x4 = T.Vector(repeating: x[j0 + 4]), x5 = T.Vector(repeating: x[j0 + 5])
+    let x6 = T.Vector(repeating: x[j0 + 6]), x7 = T.Vector(repeating: x[j0 + 7])
+    var s0 = T.Vector(), s1 = T.Vector(), s2 = T.Vector(), s3 = T.Vector()
+    var s4 = T.Vector(), s5 = T.Vector(), s6 = T.Vector(), s7 = T.Vector()
+    var i = 0
+    while i + w <= j0 {
+      let a0: T.Vector = load(c0 + i), a1: T.Vector = load(c1 + i)
+      let a2: T.Vector = load(c2 + i), a3: T.Vector = load(c3 + i)
+      let a4: T.Vector = load(c4 + i), a5: T.Vector = load(c5 + i)
+      let a6: T.Vector = load(c6 + i), a7: T.Vector = load(c7 + i)
+      let xi: T.Vector = load(x + i)
+      var yi: T.Vector = load(y + i)
+      yi = T.fma(yi, a0, x0)
+      yi = T.fma(yi, a1, x1)
+      yi = T.fma(yi, a2, x2)
+      yi = T.fma(yi, a3, x3)
+      yi = T.fma(yi, a4, x4)
+      yi = T.fma(yi, a5, x5)
+      yi = T.fma(yi, a6, x6)
+      yi = T.fma(yi, a7, x7)
+      store(yi, y + i)
+      s0 = T.fma(s0, a0, xi)
+      s1 = T.fma(s1, a1, xi)
+      s2 = T.fma(s2, a2, xi)
+      s3 = T.fma(s3, a3, xi)
+      s4 = T.fma(s4, a4, xi)
+      s5 = T.fma(s5, a5, xi)
+      s6 = T.fma(s6, a6, xi)
+      s7 = T.fma(s7, a7, xi)
+      i += w
+    }
+    y[j0] += T.horizontalSum(s0)
+    y[j0 + 1] += T.horizontalSum(s1)
+    y[j0 + 2] += T.horizontalSum(s2)
+    y[j0 + 3] += T.horizontalSum(s3)
+    symmetricDiagonalBlock(j0, A, lda, x, y)
+    while i + w <= j0 + 4 {
+      let a4: T.Vector = load(c4 + i), a5: T.Vector = load(c5 + i)
+      let a6: T.Vector = load(c6 + i), a7: T.Vector = load(c7 + i)
+      let xi: T.Vector = load(x + i)
+      var yi: T.Vector = load(y + i)
+      yi = T.fma(yi, a4, x4)
+      yi = T.fma(yi, a5, x5)
+      yi = T.fma(yi, a6, x6)
+      yi = T.fma(yi, a7, x7)
+      store(yi, y + i)
+      s4 = T.fma(s4, a4, xi)
+      s5 = T.fma(s5, a5, xi)
+      s6 = T.fma(s6, a6, xi)
+      s7 = T.fma(s7, a7, xi)
+      i += w
+    }
+    y[j0 + 4] += T.horizontalSum(s4)
+    y[j0 + 5] += T.horizontalSum(s5)
+    y[j0 + 6] += T.horizontalSum(s6)
+    y[j0 + 7] += T.horizontalSum(s7)
+    symmetricDiagonalBlock(j0 + 4, A, lda, x, y)
+    j0 += 8
+  }
   while j0 + 4 <= n {
     let c0 = A + j0 * lda, c1 = c0 + lda, c2 = c1 + lda, c3 = c2 + lda
     let x0 = T.Vector(repeating: x[j0]), x1 = T.Vector(repeating: x[j0 + 1])
@@ -261,15 +344,7 @@ public func symmetricMatrixVector<T: TridiagonalScalar>(
     y[j0 + 1] += t1
     y[j0 + 2] += t2
     y[j0 + 3] += t3
-    // The 4x4 diagonal block, upper triangle.
-    for c in 0..<4 {
-      let col = A + (j0 + c) * lda
-      for r in 0..<c {
-        y[j0 + r] += col[j0 + r] * x[j0 + c]
-        y[j0 + c] += col[j0 + r] * x[j0 + r]
-      }
-      y[j0 + c] += col[j0 + c] * x[j0 + c]
-    }
+    symmetricDiagonalBlock(j0, A, lda, x, y)
     j0 += 4
   }
   while j0 < n {

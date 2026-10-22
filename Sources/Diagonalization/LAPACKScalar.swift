@@ -12,6 +12,10 @@ public protocol BandReductionScalar: TridiagonalScalar {
   static func larft(
     _ n: Int, _ k: Int, _ v: UnsafePointer<Self>, _ ldv: Int, _ tau: UnsafePointer<Self>,
     _ t: UnsafeMutablePointer<Self>, _ ldt: Int)
+  /// T of Q = H(k) ... H(2) H(1) = I - V T V^T, backward, column-wise V (n x k; T lower triangular).
+  static func larftBackward(
+    _ n: Int, _ k: Int, _ v: UnsafePointer<Self>, _ ldv: Int, _ tau: UnsafePointer<Self>,
+    _ t: UnsafeMutablePointer<Self>, _ ldt: Int)
   /// Divide and conquer for a symmetric tridiagonal matrix (xstedc, COMPZ = 'I'); returns info.
   static func stedc(
     _ n: Int, _ d: UnsafeMutablePointer<Self>, _ e: UnsafeMutablePointer<Self>, _ z: UnsafeMutablePointer<Self>,
@@ -90,6 +94,14 @@ extension Double: BandReductionScalar {
     dlarft_("F", "C", &n, &k, v, &ldv, tau, t, &ldt)
   }
   @inline(__always)
+  public static func larftBackward(
+    _ n: Int, _ k: Int, _ v: UnsafePointer<Double>, _ ldv: Int, _ tau: UnsafePointer<Double>,
+    _ t: UnsafeMutablePointer<Double>, _ ldt: Int
+  ) {
+    var n = lint(n), k = lint(k), ldv = lint(ldv), ldt = lint(ldt)
+    dlarft_("B", "C", &n, &k, v, &ldv, tau, t, &ldt)
+  }
+  @inline(__always)
   public static func larfb(
     _ side: UnsafePointer<CChar>, _ trans: UnsafePointer<CChar>, _ m: Int, _ n: Int, _ k: Int,
     _ v: UnsafePointer<Double>, _ ldv: Int, _ t: UnsafePointer<Double>, _ ldt: Int,
@@ -151,6 +163,14 @@ extension Float: BandReductionScalar {
   ) {
     var n = lint(n), k = lint(k), ldv = lint(ldv), ldt = lint(ldt)
     slarft_("F", "C", &n, &k, v, &ldv, tau, t, &ldt)
+  }
+  @inline(__always)
+  public static func larftBackward(
+    _ n: Int, _ k: Int, _ v: UnsafePointer<Float>, _ ldv: Int, _ tau: UnsafePointer<Float>,
+    _ t: UnsafeMutablePointer<Float>, _ ldt: Int
+  ) {
+    var n = lint(n), k = lint(k), ldv = lint(ldv), ldt = lint(ldt)
+    slarft_("B", "C", &n, &k, v, &ldv, tau, t, &ldt)
   }
   @inline(__always)
   public static func larfb(

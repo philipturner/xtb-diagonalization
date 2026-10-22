@@ -2,6 +2,8 @@
 // divide and conquer (Accelerate xstedc), back-transformation of the first m eigenvectors.
 //   1-stage sym     Swift tridiagonalize (symmetric) + xstedc + xormtr: the SCC's eigensolve today
 //   1-stage unsym   the same without exploiting symmetry: the baseline for the band-reduction work (BRIEF Phase 4)
+//   1-stage sym g   1-stage sym with the back-transformation by gemm (backTransformTridiagonal) in place of xormtr,
+//                   as xTB's xtb_dormtr_upper
 //   2-stage b       reduceToBand + chaseBulges + xstedc + backTransformBulges + backTransformBand
 //
 //   swift build -c release --disable-sandbox
@@ -241,7 +243,8 @@ func benchmark<Real: EigenScalar>(_ path: String, _: Real.Type) {
   let tau: UnsafeMutablePointer<Real> = buffer(n)
   let bmax = bandwidths.max() ?? 1
   let lwork = max(1 + 4 * n + n * n, 64 * n, bandReductionWorkspace(n, bmax), bulgeBackTransformWorkspace(bmax, n),
-                  bulgeBlocksWorkspace(bmax, n), 64 * n + 100_000, 1 + 6 * n + 2 * n * n)
+                  bulgeBlocksWorkspace(bmax, n), 64 * n + 100_000, 1 + 6 * n + 2 * n * n,
+                  tridiagonalBackTransformWorkspace(n, n))
   let work: UnsafeMutablePointer<Real> = buffer(lwork)
   let liwork = 3 + 5 * n
   let iwork = UnsafeMutablePointer<Int32>.allocate(capacity: liwork)
@@ -271,6 +274,14 @@ func benchmark<Real: EigenScalar>(_ path: String, _: Real.Type) {
         timed(&t) { ormtr() }
       }))
   }
+  variants.append(Variant(
+    name: "1-stage sym g", stages: ["tridiag", "stedc", "ormtr-g"],
+    run: { t in
+      A.update(from: Hr, count: n * n)
+      timed(&t) { tridiagonalize(n, A, n, w, e, tau, work) }
+      timed(&t) { stedc() }
+      timed(&t) { backTransformTridiagonal(n, m, A, n, tau, Z, n, work) }
+    }))
   for b in bandwidths where b < n - 1 {
     variants.append(Variant(
       name: "2-stage b=\(b)", stages: ["band", "bulge", "stedc", "bt-bulge", "bt-band"],
