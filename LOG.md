@@ -611,3 +611,6 @@
   optimization with a serial eigensolve (`c12de28`, lib-fused) at OMP_NUM_THREADS=8, FP32, median of 5: 0.238 / 0.488
   / 0.927 / 0.807 / 6.032 / 25.01 s (n = 412/448/619/776/1204/1788; same cycle counts as the team build except
   1204: 58 vs 59).
+- **Throughput 8 × 1 at n = 448** (facet_dbpair_tool u1, 20 jobs per process, `build/bench-tput448.sh`): s per job
+  production 1.543, three PRs 1.124 (1.37×), current FP64 0.892 (1.73×), FP32 0.716 (2.16×). Production's workers
+  spread 27.5–30.8 s (others within 3%); Xcode was at 30% of a core when the runs ended.
