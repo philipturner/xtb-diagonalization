@@ -83,3 +83,76 @@ func vectorDotAxpy<Real: BandReductionScalar>(
   while i < n { sum += x[i] * u[i]; y[i] += alpha * x[i]; i += 1 }
   return sum
 }
+
+// Four columns per pass (the bulge chase's left and below blocks): the shared vector is loaded once per element for
+// all four columns instead of once per column.
+
+/// (x . c0, x . c1, x . c2, x . c3) over n elements.
+@inline(__always)
+func vectorDot4<Real: BandReductionScalar>(
+  _ n: Int, _ x: UnsafePointer<Real>, _ c0: UnsafePointer<Real>, _ c1: UnsafePointer<Real>,
+  _ c2: UnsafePointer<Real>, _ c3: UnsafePointer<Real>
+) -> (Real, Real, Real, Real) {
+  let w = Real.Vector.scalarCount
+  var a0 = Real.Vector(), a1 = Real.Vector(), a2 = Real.Vector(), a3 = Real.Vector()
+  var i = 0
+  while i + w <= n {
+    let xv = load(x + i)
+    a0 = Real.fma(a0, xv, load(c0 + i)); a1 = Real.fma(a1, xv, load(c1 + i))
+    a2 = Real.fma(a2, xv, load(c2 + i)); a3 = Real.fma(a3, xv, load(c3 + i))
+    i += w
+  }
+  var s0 = Real.horizontalSum(a0), s1 = Real.horizontalSum(a1)
+  var s2 = Real.horizontalSum(a2), s3 = Real.horizontalSum(a3)
+  while i < n {
+    s0 += x[i] * c0[i]; s1 += x[i] * c1[i]; s2 += x[i] * c2[i]; s3 += x[i] * c3[i]
+    i += 1
+  }
+  return (s0, s1, s2, s3)
+}
+
+/// c_j += a_j x for the four columns c0 ... c3, over n elements.
+@inline(__always)
+func vectorAxpy4<Real: BandReductionScalar>(
+  _ n: Int, _ a0: Real, _ a1: Real, _ a2: Real, _ a3: Real, _ x: UnsafePointer<Real>,
+  _ c0: UnsafeMutablePointer<Real>, _ c1: UnsafeMutablePointer<Real>, _ c2: UnsafeMutablePointer<Real>,
+  _ c3: UnsafeMutablePointer<Real>
+) {
+  let w = Real.Vector.scalarCount
+  let v0 = Real.Vector(repeating: a0), v1 = Real.Vector(repeating: a1)
+  let v2 = Real.Vector(repeating: a2), v3 = Real.Vector(repeating: a3)
+  var i = 0
+  while i + w <= n {
+    let xv = load(x + i)
+    store(Real.fma(load(c0 + i), v0, xv), c0 + i); store(Real.fma(load(c1 + i), v1, xv), c1 + i)
+    store(Real.fma(load(c2 + i), v2, xv), c2 + i); store(Real.fma(load(c3 + i), v3, xv), c3 + i)
+    i += w
+  }
+  while i < n {
+    c0[i] += a0 * x[i]; c1[i] += a1 * x[i]; c2[i] += a2 * x[i]; c3[i] += a3 * x[i]
+    i += 1
+  }
+}
+
+/// y += a0 c0 + a1 c1 + a2 c2 + a3 c3 over n elements.
+@inline(__always)
+func vectorGemv4<Real: BandReductionScalar>(
+  _ n: Int, _ y: UnsafeMutablePointer<Real>, _ c0: UnsafePointer<Real>, _ c1: UnsafePointer<Real>,
+  _ c2: UnsafePointer<Real>, _ c3: UnsafePointer<Real>, _ a0: Real, _ a1: Real, _ a2: Real, _ a3: Real
+) {
+  let w = Real.Vector.scalarCount
+  let v0 = Real.Vector(repeating: a0), v1 = Real.Vector(repeating: a1)
+  let v2 = Real.Vector(repeating: a2), v3 = Real.Vector(repeating: a3)
+  var i = 0
+  while i + w <= n {
+    var yv = load(y + i)
+    yv = Real.fma(yv, v0, load(c0 + i)); yv = Real.fma(yv, v1, load(c1 + i))
+    yv = Real.fma(yv, v2, load(c2 + i)); yv = Real.fma(yv, v3, load(c3 + i))
+    store(yv, y + i)
+    i += w
+  }
+  while i < n {
+    y[i] += a0 * c0[i] + a1 * c1[i] + a2 * c2[i] + a3 * c3[i]
+    i += 1
+  }
+}

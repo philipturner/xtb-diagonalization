@@ -21,6 +21,9 @@ public struct SBROptions {
   /// With lowerTriangle: the rank-2b update of the lower triangle by gemm per block column of 128 instead of
   /// Accelerate's syr2k, after which the bulge chase runs 15-30% slower (a hardware state, LOG.md).
   public var lowerGEMM = false
+  /// With vectorChase: the chase's left and below blocks four columns per pass (the shared vector loaded once for
+  /// all four).
+  public var quadChase = false
   /// Bulge back-transformation with triangular products at both ends of each parallelogram block (larfb treats the
   /// lower (b - 1) x b part as dense, though half of it is zero). Uses the precomputed blocks (prepareBulgeBlocks).
   public var parallelogram = false
@@ -39,7 +42,7 @@ public struct SBROptions {
   public static var all: SBROptions {
     var o = SBROptions()
     o.trailingOnly = true; o.combinedUpdate = true; o.lowerTriangle = true; o.symmetricChase = true
-    o.compactBand = true; o.vectorChase = true; o.lowerGEMM = true
+    o.compactBand = true; o.vectorChase = true; o.lowerGEMM = true; o.quadChase = true
     o.parallelogram = true; o.gemmWY = true
     return o
   }
@@ -49,10 +52,12 @@ public struct SBROptions {
   /// FP32 takes the gemm WY apply everywhere; FP64 only alone or below n = 700, since with 8 processes larfb wins at
   /// n >= 776 (AMX contention). From n = 700 the first stage updates only the lower triangle, by gemm blocks (not
   /// syr2k, after which the bulge chase runs 15-30% slower): 1-5% faster alone, 13-21% more throughput at 8 x 1 for
-  /// n >= 1204 (FP32 n = 1204 unchanged).
+  /// n >= 1204 (FP32 n = 1204 unchanged). The chase's left and below blocks four columns per pass: chase 10-17%
+  /// faster at n = 412-1788.
   public static func recommended(n: Int, fp32: Bool, manyProcesses: Bool) -> (options: SBROptions, bandwidth: Int) {
     var o = SBROptions()
     o.trailingOnly = true; o.combinedUpdate = true; o.symmetricChase = true; o.vectorChase = true
+    o.quadChase = true
     o.lowerTriangle = n >= 700
     o.lowerGEMM = n >= 700
     o.gemmWY = fp32 || !manyProcesses || n < 700

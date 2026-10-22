@@ -430,3 +430,16 @@
   processes at n = 1788 FP64: 1-stage 2.6x, 2-stage 4.0x). At 8 x 1 FP64 prefers no gemmWY at every n, FP32 prefers
   it at n = 776 and 1788 but not 1204. The 1-stage 8 x 1 numbers were 10–13% below the earlier run, so the earlier
   cross-run estimate (1.20x FP32) was off; trust same-run comparisons only.
+- **Step 3 (denser bulge WY blocks) is a dead end; step 4 (four-column chase) done.** `scripts/bulge_blocks.py`
+  brute-forces which reflectors can share a block: the back-transformation applies them in reverse reduction order
+  and overlapping ones can't swap, so a block must be convex in that order. Today's parallelogram (b sweeps, one bulge)
+  has density 0.53 at b = 8; the dense-looking same-rows pair H(s, k), H(s − b, k + 1) forces 16 reflectors over 22
+  rows (0.36), three such 45 over 36 (0.22); only thinner parallelograms are denser (b/2 sweeps: 0.73), which is the
+  `v` option already measured slower. The ~50% zero fill is the price of a legal order.
+  `SBROptions.quadChase` (`q`, with `x`): the chase's left and below blocks four columns per pass (`vectorDot4`,
+  `vectorAxpy4`, `vectorGemv4`; the shared vector loaded once for four columns). Accuracy: random n = 5–131, FP64
+  ≤ 5.0e-14, FP32 ≤ 8.3e-6. Chase / total, ms (`build/quadchase.txt`, median of 7–9, without → with `q`): FP64 n =
+  412 b = 32 3.59 → 2.99 / 14.40 → 13.80, 619 b = 32 8.29 → 6.86 / 37.35 → 35.89, 776 b = 48 16.20 → 14.38 / 59.32 →
+  57.44, 1204 b = 48 39.81 → 35.23 / 181.94 → 176.90, 1788 b = 64 109.49 → 98.86 / 500.73 → 489.89; FP32 412 2.89 →
+  2.49, 619 6.55 → 5.67, 776 11.85 → 9.96, 1204 28.52 → 24.00, 1788 73.68 → 63.10. Chase 10–17% faster, total 2–5%.
+  The diagonal triangle (~1/5 of the chase's memory operations) is still one column per pass. `recommended()` adds `q`.
