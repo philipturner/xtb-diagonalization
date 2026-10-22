@@ -594,3 +594,11 @@
   Accelerate, OpenMP for C and Fortran: `build/xtb-build-s26d`, same tree) and installed relocatable
   (`build/install-swift-xtb-lib2.sh LIB DEST`): `bash test.sh` 20/20 pass (FP32 precision and GFN-FF tests
   included), no stray files. The user pushes xtb `diagonalization` and swift-xtb `fp32-diagonalization`.
+- **swift-xtb docs** (`e8a6ebc`, from another session's review): `threadCount` now says it covers the SCC eigensolve
+  (divide and conquer on all threads, reduction on at most one fast-core cluster, back-transformation on two; that
+  session measured no singlepoint gain from 8 threads over 4, and 1.6–1.8× at 4 over 1), and that Accelerate follows
+  VECLIB_MAXIMUM_THREADS set before launch. xTB_Precision's speed note updated to this library (FP32 vs FP64: 8–16%
+  less time per singlepoint at 8 threads, 17–43% more throughput at 8 × 1). The FP32 test's `accuracy: 2e-3` is in zJ
+  (5e-7 Eh, the production gate), not Eh; left as is, comment clarified. Not changed (on swift-xtb `main`):
+  `xTB_ZJPerHartree` 4359.7482 and `xTB_NmPerBohr` 0.0529177 vs CODATA 2018 4359.7447 and 0.0529177211 (0.8 ppm
+  in energies).
