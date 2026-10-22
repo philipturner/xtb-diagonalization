@@ -602,3 +602,6 @@
   (5e-7 Eh, the production gate), not Eh; left as is, comment clarified. Not changed (on swift-xtb `main`):
   `xTB_ZJPerHartree` 4359.7482 and `xTB_NmPerBohr` 0.0529177 vs CODATA 2018 4359.7447 and 0.0529177211 (0.8 ppm
   in energies).
+- **VECLIB_MAXIMUM_THREADS 1 vs 8** (lib-team, OMP_NUM_THREADS=8, median of 5, `build/cases/veclib/`): FP64 n = 412
+  +1.3%, 619 +0.3%, 776 +2.4%, 1204 −1.8%; FP32 +0.4%, 619 +9.5% then +0.6% / +3.2% on two reruns (noise), 776 +0.6%,
+  1204 −0.2%; same cycle counts. swift-xtb docs say so (`d1d1265`).
