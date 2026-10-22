@@ -11,7 +11,7 @@ including the benchmark process itself. Spread within each set of 5 was ≤ 4%.
 
 | Build | Source | How |
 | --- | --- | --- |
-| production | `../claude-molecular-renderer/libxtb.dylib` | fork branch `swift-xtb-2026` at `8ea5fcd` (see below) |
+| production | `../claude-molecular-renderer/libxtb.dylib` until 2026-10-22, now `../claude-molecular-renderer/.build/archive/2026-10-22-xtb-production/libxtb.dylib` (same sha256) | fork branch `swift-xtb-2026` at `8ea5fcd` (see below) |
 | main | `xtb/` at `68fe777` (= grimme-lab/xtb `main`, 2026-10-08) | `scripts/build_xtb.sh` → `build/xtb-build-main/` |
 | main + timers | `diagonalization` at `db30346` | same flags → `build/xtb-build-main-timers/` |
 | v6.7.1 | tag `v6.7.1` (`26b2801`, 2024-07-23), worktree `build/xtb-v6.7.1/` | same flags, plus `-std=gnu17` and an mctc-lib pin (below) → `build/xtb-build-v6.7.1/` |

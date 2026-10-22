@@ -6,8 +6,11 @@ plan and the acceptance criteria; read it in full at the start of each session, 
 
 ## Hard rules
 - Write only inside this repository (including `build/`, git-ignored). The mechanosynthesis repository
-  `../claude-molecular-renderer` is read-only: its `libxtb.dylib` is the production library and the baseline; never
-  modify or replace it. Never modify the Homebrew xtb install.
+  `../claude-molecular-renderer` is read-only; never modify or replace anything in it. The baseline (production
+  6.7.1 + Accelerate, behind `reference/`) is
+  `../claude-molecular-renderer/.build/archive/2026-10-22-xtb-production/libxtb.dylib`. Since 2026-10-22 that
+  repository's root `libxtb.dylib` is this fork's `diagonalization` build (FP32 on by default there), not the baseline.
+  Never modify the Homebrew xtb install.
 - xTB source changes go on the public branch `diagonalization` of the `xtb/` submodule (fork github.com/philipturner/xtb;
   remote `upstream` = grimme-lab/xtb), one commit per step with its measurement in the message, plus the matching
   submodule-pointer commit here. Never commit to the fork's `main`: it only fast-forwards to upstream `main`

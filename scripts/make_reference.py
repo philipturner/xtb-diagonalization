@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Mac: reference GFN2 results for the diagonalization test set (structures/MANIFEST.tsv), through the xTB C API exactly
 as production calls it: fresh results object per single point (cold SCF), accuracy 1.0, maxiter 250.
-Library: --lib PATH, else $XTB_LIB, else the PRODUCTION library ../claude-molecular-renderer/libxtb.dylib (xtb 6.7.1 +
-Accelerate, the one the mechanosynthesis repo's xtb_lib.py and Swift code load; read-only, never replace it from here).
+Library: --lib PATH, else $XTB_LIB, else the PRODUCTION baseline (xtb 6.7.1 + Accelerate, behind reference/), archived at
+../claude-molecular-renderer/.build/archive/2026-10-22-xtb-production/libxtb.dylib
+(read-only). The mechanosynthesis repo's root libxtb.dylib is this fork's diagonalization build since 2026-10-22.
 --out DIR writes somewhere other than reference/ (use it for every non-production library).
 
 Settings grid per structure: electronic temperature 100 / 300 (production) / 1000 K, uhf = the two lowest spin states
@@ -26,7 +27,7 @@ import sccprecision
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-LIB = os.path.abspath(os.environ.get('XTB_LIB') or os.path.join(ROOT, '../claude-molecular-renderer/libxtb.dylib'))
+LIB = os.path.abspath(os.environ.get('XTB_LIB') or os.path.join(ROOT, '../claude-molecular-renderer/.build/archive/2026-10-22-xtb-production/libxtb.dylib'))
 ST, REF = f"{ROOT}/structures", f"{ROOT}/reference"
 BOHR = 0.52917721067
 Z = {'H': 1, 'C': 6, 'O': 8, 'Si': 14, 'Ge': 32}

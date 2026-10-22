@@ -9,7 +9,7 @@
 setopt NO_BG_NICE
 cd /Users/philipturner/Documents/MolecularRenderer/xtb-diagonalization
 PY=~/miniforge3/bin/python
-PROD=../claude-molecular-renderer/libxtb.dylib
+PROD=../claude-molecular-renderer/.build/archive/2026-10-22-xtb-production/libxtb.dylib
 mkdir -p build/cases
 CASES=facet_closed:0,facet_dbpair_tool:1,s3_S42_159:1,diamond233:0,sic_n1204:0,sic_n1788:0
 # Case B: latency, 8 OpenMP threads

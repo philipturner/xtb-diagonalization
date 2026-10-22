@@ -614,3 +614,28 @@
 - **Throughput 8 × 1 at n = 448** (facet_dbpair_tool u1, 20 jobs per process, `build/bench-tput448.sh`): s per job
   production 1.543, three PRs 1.124 (1.37×), current FP64 0.892 (1.73×), FP32 0.716 (2.16×). Production's workers
   spread 27.5–30.8 s (others within 3%); Xcode was at 30% of a core when the runs ended.
+
+## 2026-10-22 (FP32 eigensolver failure; baseline library moved)
+
+- **Report from the mechanosynthesis repo** (test set `t2_fp32fail`, `0de9fcd`): with FP32 1e-3 (xtb `03ae163`) the
+  uhf 1 runs abort in the SCC with "Failed to compute eigenvalues and eigenvectors", E = 0, no FP64 restart; FP64 and
+  uhf 3 converge. Reproduced with a fresh `scripts/build_xtb.sh` build of `diagonalization` (`build/xtb-build-diag`).
+- **Cause:** Accelerate's legacy `sstedc` (n = 124, below the parallel D&C threshold) returns info 4062: the merge of
+  rows 32–62 (15 + 16) fails because legacy `slaed4` doesn't converge on root 30 of 31 (poles 0.2383 and 0.3874 after
+  scaling, weight −2.8e-5; no deflation). The tridiagonal is benign (finite, |d|, |e| ≤ 17, min |e| 0.013). On the same
+  input Accelerate `dstedc`, `sstedc$NEWLAPACK` / `slaed1$NEWLAPACK` / `slaed4$NEWLAPACK` and OpenBLAS `sstedc` all
+  succeed (reproduced from a dump with ctypes: legacy `slaed1` info 1, `slaed4` info 1 on root 30 only). Not a
+  conditioning problem of the subspace step. The error went through `env%error`, and scf's FP64 restart requires no
+  pending error, so it never ran.
+- **Fix** (xtb `392337f`): the FP32 eigensolve and its FP64 refinement return a nonzero LAPACK info through an optional
+  `stat` instead of raising; `scc` then ends the SCC unconverged (`fp32_info`), and the existing restart reruns it in
+  FP64 from the same start (`fp64_restart` = 1). t2_fp32fail FP32: uhf 1 at 100/300/1000 K converge after the restart in
+  18 cycles as production, |dE| ≤ 7.8e-14 Eh, |dgrad| ≤ 4.3e-15 Eh/bohr vs `reference/`; uhf 3 unchanged. facet_closed
+  FP32 (6 runs): energies, gradients and cycle counts bit-identical to the 03ae163 library.
+- **Baseline moved:** `../claude-molecular-renderer/libxtb.dylib` is now the fork (03ae163, FP32 on there). Production
+  6.7.1 (sha256 `2da8fa6a…`, behind `reference/`) is at `../claude-molecular-renderer/.build/archive/2026-10-22-xtb-production/libxtb.dylib`:
+  now the default of `make_reference.py` and `PROD` in `bench_cases.sh`; CLAUDE.md, BRIEF.md and baseline.md say so.
+  The other scripts take the library as an argument.
+- **Next:** the user pushes xtb `diagonalization` (392337f) and rebuilds the mechanosynthesis library; the swift-xtb
+  `fp32-diagonalization` build picks it up from the branch. Optional: check how often legacy `slaed4` fails on the FP32
+  grid (it would also hit the parallel D&C's merges at n ≥ 256, which call the same routine).
