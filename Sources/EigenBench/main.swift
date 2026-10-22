@@ -20,11 +20,16 @@
 // stage's largest entry outside its target band.
 // --opts "t;tcl;tclsp;tclspk128": extra 2-stage variants with SBROptions, one per set, named 2s[set]: t trailing block
 // only, c combined (sy2sb) update, l lower triangle, s symmetric chase, p parallelogram back-transformation, kN column
-// blocks of N, g compact WY blocks by three gemm calls instead of larfb, vN bulge back-transformation blocks of N
-// sweeps (default b), b band storage and x vector kernels for the symmetric chase, u (with l) the lower update by gemm
-// blocks instead of syr2k, q (with x) the chase's left and below blocks four columns per pass, o eight (implies q).
+// blocks of N, jN N worker threads (Parallel.swift: stage 1's update, the chase, divide and conquer, the back-
+// transformations; aN and hN override the count for stage 1 and the chase), g compact WY blocks by three gemm calls
+// instead of larfb, vN bulge back-transformation blocks of N sweeps (default b), b band storage and x vector kernels
+// for the symmetric chase, u (with l) the lower update by gemm blocks instead of syr2k, q (with x) the chase's left and
+// below blocks four columns per pass, o eight (implies q).
 // With p or k the bulge blocks are precomputed (stage "prep"); otherwise each is built just before it's applied
 // (backTransformBulgesBlocked), which is faster for one thread.
+// --threads 2,4: extra "1-stage sym g jN" variants, the 1-stage path with divide and conquer and the
+// back-transformation on N workers (divideAndConquerParallel, backTransformTridiagonalParallel); the reduction stays
+// serial.
 // --procs P [--jobs K]: throughput instead of latency. For each variant, P copies of this program (one file only)
 // start together and each runs the variant K times (default 20) after a warm-up; reports jobs per second as a work
 // queue sees it (sum over processes of K / elapsed) and the median job time. Run with VECLIB_MAXIMUM_THREADS=1.
@@ -112,6 +117,7 @@ var sbrGeneral = false
 var procs = 0
 var jobs = 20
 var optionSets: [String] = []
+var oneStageThreads: [Int] = []
 var workerVariant: Int? = nil
 var workerStart = 0.0
 var files: [String] = []
@@ -132,6 +138,7 @@ while argi < args.count {
   case "--sbr-general": sbrGeneral = true; argi += 1
   case "--procs": procs = Int(args[argi + 1])!; argi += 2
   case "--opts": optionSets = args[argi + 1].split(separator: ";").map(String.init); argi += 2
+  case "--threads": oneStageThreads = args[argi + 1].split(separator: ",").map { Int($0)! }; argi += 2
   case "--jobs": jobs = Int(args[argi + 1])!; argi += 2
   case "--worker": workerVariant = Int(args[argi + 1])!; workerStart = Double(args[argi + 2])!; argi += 3
   default: files.append(args[argi]); argi += 1
@@ -194,6 +201,19 @@ func parseOptions(_ set: String) -> SBROptions {
       let digits = rest.prefix { $0.isNumber }
       o.columnBlock = Int(digits)!
       rest = rest.dropFirst(digits.count)
+    case "j":
+      let digits = rest.prefix { $0.isNumber }
+      o.threads = Int(digits)!
+      rest = rest.dropFirst(digits.count)
+    case "a":
+      let digits = rest.prefix { $0.isNumber }
+      o.bandThreads = Int(digits)!
+      rest = rest.dropFirst(digits.count)
+    case "w": o.overlapChase = true
+    case "h":
+      let digits = rest.prefix { $0.isNumber }
+      o.chaseThreads = Int(digits)!
+      rest = rest.dropFirst(digits.count)
     default: fatalError("unknown option \(ch) in \(set)")
     }
   }
@@ -229,6 +249,21 @@ func accuracy<Real: BinaryFloatingPoint>(
   return (dw, res / scale, orth)
 }
 
+/// FNV-1a hash of the tridiagonal matrix (d, e bits) each 2-stage variant produced in its last run, so that variants
+/// that must give the same bits (e.g. the chase with and without threads) can be compared: printed per variant.
+nonisolated(unsafe) var tridiagonalHashes: [String: UInt64] = [:]
+
+func recordTridiagonal<Real: BinaryFloatingPoint>(
+  _ name: String, _ n: Int, _ d: UnsafePointer<Real>, _ e: UnsafePointer<Real>
+) {
+  var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+  for array in [UnsafeRawBufferPointer(start: d, count: n * MemoryLayout<Real>.stride),
+                UnsafeRawBufferPointer(start: e, count: max(n - 1, 0) * MemoryLayout<Real>.stride)] {
+    for byte in array { hash = (hash ^ UInt64(byte)) &* 0x100_0000_01b3 }
+  }
+  tridiagonalHashes[name] = hash
+}
+
 /// Runs every variant on one matrix in precision Real: latency per stage with accuracy checks, or (procs > 0 or in
 /// a worker) throughput.
 func benchmark<Real: EigenScalar>(_ path: String, _: Real.Type) {
@@ -244,15 +279,18 @@ func benchmark<Real: EigenScalar>(_ path: String, _: Real.Type) {
   let bmax = bandwidths.max() ?? 1
   let lwork = max(1 + 4 * n + n * n, 64 * n, bandReductionWorkspace(n, bmax), bulgeBackTransformWorkspace(bmax, n),
                   bulgeBlocksWorkspace(bmax, n), 64 * n + 100_000, 1 + 6 * n + 2 * n * n,
-                  tridiagonalBackTransformWorkspace(n, n))
+                  tridiagonalBackTransformWorkspace(n, n), 8 * twoStageBackTransformWorkspace(n, bmax, n, threads: 8),
+                  8 * tridiagonalBackTransformWorkspace(n, (n + 1) / 2))
   let work: UnsafeMutablePointer<Real> = buffer(lwork)
   let liwork = 3 + 5 * n
   let iwork = UnsafeMutablePointer<Int32>.allocate(capacity: liwork)
   let v1: UnsafeMutablePointer<Real> = buffer(n * n), t1: UnsafeMutablePointer<Real> = buffer(bmax * n)
   let v2: UnsafeMutablePointer<Real> = buffer(n * n)
 
-  func stedc() {
-    let info = divideAndConquer(n, w, e, Z, n, work, divideAndConquerWorkspace(n).0, iwork, liwork)
+  func stedc(threads: Int = 1) {
+    let info = threads > 1
+      ? divideAndConquerParallel(n, w, e, Z, n, threads: threads)
+      : divideAndConquer(n, w, e, Z, n, work, divideAndConquerWorkspace(n).0, iwork, liwork)
     if info != 0 { fatalError("stedc info \(info)") }
   }
   func ormtr() {
@@ -282,6 +320,16 @@ func benchmark<Real: EigenScalar>(_ path: String, _: Real.Type) {
       timed(&t) { stedc() }
       timed(&t) { backTransformTridiagonal(n, m, A, n, tau, Z, n, work) }
     }))
+  for threads in oneStageThreads where threads > 1 {
+    variants.append(Variant(
+      name: "1-stage sym g j\(threads)", stages: ["tridiag", "stedc", "ormtr-g"],
+      run: { t in
+        A.update(from: Hr, count: n * n)
+        timed(&t) { tridiagonalize(n, A, n, w, e, tau, work) }
+        timed(&t) { stedc(threads: threads) }
+        timed(&t) { backTransformTridiagonalParallel(n, m, A, n, tau, Z, n, work, threads: threads) }
+      }))
+  }
   for b in bandwidths where b < n - 1 {
     variants.append(Variant(
       name: "2-stage b=\(b)", stages: ["band", "bulge", "stedc", "bt-bulge", "bt-band"],
@@ -305,12 +353,22 @@ func benchmark<Real: EigenScalar>(_ path: String, _: Real.Type) {
         name: "2s[\(set)] b=\(b)", stages: ["band", "bulge", "stedc", "prep", "bt"],
         run: { t in
           A.update(from: Hr, count: n * n)
-          timed(&t) { reduceToBand(n, b, A, n, v1, t1, work, o) }
-          timed(&t) { chaseBulges(n, b, A, n, v2, w, e, work, o) }
-          timed(&t) { stedc() }
+          if o.overlapChase {
+            // Both stages at once: their time is reported under "band", "bulge" 0.
+            timed(&t) { reduceToTridiagonalOverlapped(n, b, A, n, v1, t1, v2, w, e, work, o) }
+            t.append(0)
+          } else {
+            timed(&t) { reduceToBand(n, b, A, n, v1, t1, work, o) }
+            timed(&t) { chaseBulges(n, b, A, n, v2, w, e, work, o) }
+          }
+          recordTridiagonal("2s[\(set)] b=\(b)", n, w, e)
+          timed(&t) { stedc(threads: o.threads) }
           if o.parallelogram || o.columnBlock > 0 {
             timed(&t) { blocks = prepareBulgeBlocks(n, b, v2) }
             timed(&t) { backTransformTwoStage(n, b, blocks, v1, t1, Z, n, m, o, work) }
+          } else if o.threads > 1 {
+            t.append(0)
+            timed(&t) { backTransformTwoStageParallel(n, b, v1, t1, v2, Z, n, m, o, work) }
           } else {
             // Blocks built just before use (in cache): faster than precomputing them for one thread.
             t.append(0)
@@ -458,6 +516,7 @@ func benchmark<Real: EigenScalar>(_ path: String, _: Real.Type) {
       if r == -1 {
         let (dw, res, orth) = accuracy(n, m, H, wRef, w, Z)
         checks[k] = String(format: "eigenvalues %.1e Eh, residual %.1e, orthogonality %.1e", dw, res, orth)
+        if let hash = tridiagonalHashes[v.name] { checks[k] += ", tridiagonal " + String(hash, radix: 16) }
       }
     }
   }

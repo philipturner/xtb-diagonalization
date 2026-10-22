@@ -38,6 +38,19 @@ public struct SBROptions {
   /// Sweeps per block of the bulge back-transformation (1 ... b; 0 means b): fewer than b wastes less arithmetic on the
   /// block's zeros ((b + g - 1) / b times the reflectors' own) for a thinner gemm.
   public var bulgeGroup = 0
+  /// Worker threads for one eigensolve (Parallel.swift); 1 runs everything on the calling thread. So far: stage 1's
+  /// combined update (its gemm calls by row or column blocks; the panel QR and symm stay serial), the symmetric bulge
+  /// chase (pipelined sweeps, same bits), divide and conquer (divideAndConquerParallel) and the 2-stage
+  /// back-transformations (column blocks).
+  public var threads = 1
+  /// Workers for stage 1's update alone (0: `threads`). Its gemm calls share one AMX unit per cluster, so more
+  /// workers can be slower (LOG.md).
+  public var bandThreads = 0
+  /// Workers for the bulge chase alone (0: `threads`). The pipeline gains at 2 and loses beyond (LOG.md).
+  public var chaseThreads = 0
+  /// Stage 1 and the bulge chase at once (reduceToTridiagonalOverlapped): the chase follows stage 1's frontier down
+  /// the matrix on chaseThreads workers (0: threads - 1, at least 1). Same bits. Needs c and s, not b.
+  public var overlapChase = false
 
   public init() {}
 

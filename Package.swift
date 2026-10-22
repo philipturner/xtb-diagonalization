@@ -12,6 +12,10 @@ let package = Package(
     .executable(name: "sytrd-bench", targets: ["SytrdBench"]),
     .executable(name: "eigen-bench", targets: ["EigenBench"]),
   ],
+  dependencies: [
+    // ManagedAtomic for the work counters of the parallel stages (Parallel.swift).
+    .package(url: "https://github.com/apple/swift-atomics.git", from: "1.2.0"),
+  ],
   targets: [
     // The legacy Fortran-ABI BLAS/LAPACK symbols in Accelerate, the ones libxtb links (BLA_VENDOR=Apple).
     .target(
@@ -21,7 +25,7 @@ let package = Package(
     .target(name: "CSIMD"),
     .target(
       name: "Diagonalization",
-      dependencies: ["CLAPACK", "CSIMD"],
+      dependencies: ["CLAPACK", "CSIMD", .product(name: "Atomics", package: "swift-atomics")],
       swiftSettings: [.unsafeFlags(["-enforce-exclusivity=unchecked"])]),
     .executableTarget(
       name: "SytrdBench",

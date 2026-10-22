@@ -21,12 +21,14 @@ public func bandReductionWorkspace(_ n: Int, _ b: Int) -> Int {
 /// v1 (n x n, leading dimension n; rows j + b ..< n of columns j ..< j + k, geqrf layout, unit diagonal implied) and
 /// the triangular factor T in t1 (b x n, leading dimension b; columns j ..< j + k), where k = min(b, n - j - b).
 /// With options.gemmWY, V is stored explicitly (unit diagonal, zeros above; R goes only to a) and the block reflectors
-/// are applied by three gemm calls.
+/// are applied by three gemm calls. panelDone (optional) receives after each panel its frontier f: the panels still to
+/// come change only entries whose row and column are both >= f, so every entry with a row or column below f is final.
 @_specialize(exported: true, where Real == Double)
 @_specialize(exported: true, where Real == Float)
 public func reduceToBand<Real: BandReductionScalar>(
   _ n: Int, _ b: Int, _ a: UnsafeMutablePointer<Real>, _ lda: Int, _ v1: UnsafeMutablePointer<Real>,
-  _ t1: UnsafeMutablePointer<Real>, _ work: UnsafeMutablePointer<Real>, _ options: SBROptions = SBROptions()
+  _ t1: UnsafeMutablePointer<Real>, _ work: UnsafeMutablePointer<Real>, _ options: SBROptions = SBROptions(),
+  panelDone: ((Int) -> Void)? = nil
 ) {
   let tau = work, scratch = work + b
   let lscratch = n * b + 64 * b
@@ -72,8 +74,16 @@ public func reduceToBand<Real: BandReductionScalar>(
       if g { wyMakeExplicit(m, k, v, n) }
       // Trailing block A2 = A[r ..< n, r ..< n]: X = A2 V T, W = X - 1/2 V (T^T V^T X), A2 -= V W^T + W V^T.
       let a2 = a + offset(r, r, lda)
+      // With options.threads > 1, the gemm calls below run on column (or row) blocks of `width` over the workers.
+      let threads = options.bandThreads > 0 ? options.bandThreads : options.threads
+      let width = threads > 1 ? max(32, min(128, (m + 2 * threads - 1) / (2 * threads) + 15) / 16 * 16) : m
       if lower {
         Real.symmLower(m, k, 1, a2, lda, vf, m, 0, x, m)
+      } else if threads > 1 {
+        parallelBlocks((m + width - 1) / width, threads: threads) { blk in
+          let r0 = blk * width, h = min(width, m - r0)
+          Real.gemm("N", "N", h, k, m, 1, a2 + r0, lda, vf, m, 0, x + r0, m)
+        }
       } else {
         Real.gemm("N", "N", m, k, m, 1, a2, lda, vf, m, 0, x, m)
       }
@@ -87,19 +97,33 @@ public func reduceToBand<Real: BandReductionScalar>(
           // The same lower triangle by gemm per block column (rows c ..< m of columns c ..< c + 128, the diagonal
           // block in full; its upper part is never read): 8-11% slower than Accelerate's syr2k, but syr2k leaves the
           // core in a state where the L2-bound bulge chase right after it runs 15-30% slower (LOG.md); gemm doesn't.
-          for c in stride(from: 0, to: m, by: 128) {
-            let w = min(128, m - c), h = m - c
+          let step = threads > 1 ? width : 128
+          parallelBlocks((m + step - 1) / step, threads: threads) { blk in
+            let c = blk * step, w = min(step, m - c), h = m - c
             Real.gemm("N", "T", h, w, k, -1, vf + c, m, x + c, m, 1, a2 + offset(c, c, lda), lda)
             Real.gemm("N", "T", h, w, k, -1, x + c, m, vf + c, m, 1, a2 + offset(c, c, lda), lda)
           }
         } else {
           Real.syr2kLower(m, k, -1, vf, m, x, m, 1, a2, lda)
         }
+      } else if threads > 1 {
+        parallelBlocks((m + width - 1) / width, threads: threads) { blk in
+          let c = blk * width, w = min(width, m - c)
+          Real.gemm("N", "T", m, w, k, -1, vf, m, x + c, m, 1, a2 + offset(0, c, lda), lda)
+          Real.gemm("N", "T", m, w, k, -1, x, m, vf + c, m, 1, a2 + offset(0, c, lda), lda)
+        }
       } else {
         Real.gemm("N", "T", m, m, k, -1, vf, m, x, m, 1, a2, lda)
         Real.gemm("N", "T", m, m, k, -1, x, m, vf, m, 1, a2, lda)
       }
     }
+    panelDone?(j + b)
+  }
+  if panelDone != nil {
+    // Overlapped with the chase (reduceToTridiagonalOverlapped): the combined update has already left every entry
+    // outside the band exactly zero, so the passes below would change nothing, but they would race the chase.
+    precondition(options.combinedUpdate, "panelDone needs the combined update")
+    return
   }
   if lower && options.symmetricChase {
     // Stage 2 reads only the lower triangle, which is already exactly zero outside the band (the panels below it

@@ -481,3 +481,35 @@
   dlaed3): on GFN2 tridiagonals the top merge's eigenvector gemm is small (n = 412: 0.57 of 4.57 ms; roots by dlaed4
   1.19, halves 2.63), so forming only the occupied columns gains just 1.10–1.11×. Its value is parallelism (two
   halves, independent roots); the parallel solver below uses it.
+
+## 2026-10-22 night — Parallel eigensolver (one SCF, several threads); the user away until 08:00
+
+- **Infrastructure** (`Parallel.swift`, swift-atomics): `parallelBlocks` runs `concurrentPerform` with exactly
+  `threads` workers that claim blocks from a `ManagedAtomic` counter; `Progress` spin-waits (acquire/release) with a
+  10 s stall trap. `SBROptions.threads` (`jN`), per-stage overrides `bandThreads` (`aN`), `chaseThreads` (`hN`),
+  `overlapChase` (`w`). eigen-bench prints an FNV hash of the tridiagonal matrix per 2-stage variant (bit checks) and
+  `--threads 2,4` adds parallel 1-stage variants.
+- **Stage-by-stage, eigensolve alone** (1 × 1 machine, median of 5; `build/parallel-latency.txt`,
+  `build/scan2stage.txt`, `build/parallel-1stage-latency.txt`):
+  - Divide and conquer (`ParallelDivideAndConquer.swift`: tear at n/2 recursively, halves at once, merge as dlaed1
+    with dlaed4 roots / vectors / gemm column blocks over the workers): 2.3–2.8× at 8 threads (n = 412 FP64 3.83 →
+    1.71 ms, 1788 72.5 → 27.1). Accuracy as xstedc in FP64; FP32 orthogonality 2–4× worse (≤ 8e-6).
+    Accelerate's own xstedc doesn't parallelize: VECLIB_MAXIMUM_THREADS 1 → 8 (set at launch) changes it by ≤ 4%.
+  - Back-transformations by column blocks: 2-stage 1.6–1.7×, 1-stage (gemm ormtr) 1.2–2.3× (best at 2 threads for
+    n ≤ 1204: the gemm calls share one AMX unit per cluster).
+  - Chase pipelined over sweeps (`hN`; bulge k of sweep s waits for sweep s − 1's bulge k + 3; bit-identical at 2–8
+    threads, FP64 and FP32): gains only at 2–3 workers and only on its own (n = 1204: 32.6 → 25.0 ms with 3); next
+    to 8-thread stages it gets much slower than serial (n = 619 h2: 6.5 → 10.2 ms; h3: 31 ms), so it is fragile.
+  - Stage 1's gemm calls split by column blocks: slower (n = 412: 2.03 → 2.67 ms; AMX shared).
+  - **Chase during stage 1** (`w`, `reduceToTridiagonalOverlapped`: stage 1 publishes its frontier after each panel;
+    bulge (s, k) runs once rows and columns rs − b ..< rs + 2b are final; one worker in wavefront order p = k + 4s;
+    bit-identical): no gain (n = 1204 FP64 61.3 vs 59.2 ms). Structural: sweep 0 needs the frontier at (k₀ + 2)b, sweep
+    s trails by 3 bulges, so before stage 1 ends only ~k₀²/6 bulges are possible (≈ 100 of 15 000 at n = 1204,
+    b = 48), and stage 1's frontier moves slowly first (n/2 after 7/8 of its time). The w + h3 gains came from h3.
+  - **Best per path, eigensolve alone** (ms; 1-stage `sym g` with D&C and back-transformation on 8 workers; 2-stage
+    `a1h1j8`, b = 32 to n = 776, 48 above): FP64 n = 619 14.6 vs 22.3, 776 25.9 vs 31.4, 1204 81.0 vs 98.7, 1788
+    273.0 vs **256.0**; FP32 8.4 vs 13.5, 13.4 vs 18.9, 42.1 vs 55.3, 115.8 vs 137.3. The parallel 1-stage wins up to
+    n ≈ 1600 (FP64) and beyond 1788 (FP32); serial 1-stage → parallel 1-stage −21 to −34%.
+- **Bug found by AddressSanitizer:** xlaed2 stores deflated eigenvectors in Q2 with leading dimension n, past the
+  documented n1² + n2² (FP32 n = 1788 crashed intermittently); Q2 is now n² as dlaed1 sizes it. The parallel path calls
+  Accelerate's `$NEWLAPACK` symbols (documented thread-safe).

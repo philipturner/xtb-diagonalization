@@ -21,6 +21,28 @@ public protocol BandReductionScalar: TridiagonalScalar {
     _ n: Int, _ d: UnsafeMutablePointer<Self>, _ e: UnsafeMutablePointer<Self>, _ z: UnsafeMutablePointer<Self>,
     _ ldz: Int, _ work: UnsafeMutablePointer<Self>, _ lwork: Int, _ iwork: UnsafeMutablePointer<Int32>, _ liwork: Int
   ) -> Int32
+  /// xstedc from Accelerate's new LAPACK interface, documented as thread-safe; for divideAndConquerParallel's leaves,
+  /// which run concurrently.
+  static func stedcThreadSafe(
+    _ n: Int, _ d: UnsafeMutablePointer<Self>, _ e: UnsafeMutablePointer<Self>, _ z: UnsafeMutablePointer<Self>,
+    _ ldz: Int, _ work: UnsafeMutablePointer<Self>, _ lwork: Int, _ iwork: UnsafeMutablePointer<Int32>, _ liwork: Int
+  ) -> Int32
+  /// Divide and conquer's deflation of a rank-one merge (xlaed2, new interface); returns info, k in k.
+  static func laed2(
+    _ k: UnsafeMutablePointer<Int32>, _ n: Int, _ n1: Int, _ d: UnsafeMutablePointer<Self>,
+    _ q: UnsafeMutablePointer<Self>, _ ldq: Int, _ indxq: UnsafeMutablePointer<Int32>,
+    _ rho: UnsafeMutablePointer<Self>,
+    _ z: UnsafeMutablePointer<Self>, _ dlamda: UnsafeMutablePointer<Self>, _ w: UnsafeMutablePointer<Self>,
+    _ q2: UnsafeMutablePointer<Self>, _ indx: UnsafeMutablePointer<Int32>, _ indxc: UnsafeMutablePointer<Int32>,
+    _ indxp: UnsafeMutablePointer<Int32>, _ coltyp: UnsafeMutablePointer<Int32>) -> Int32
+  /// Root i (1-based) of the secular equation (xlaed4, new interface): delta (n) and the root; returns info.
+  static func laed4(
+    _ n: Int, _ i: Int, _ d: UnsafePointer<Self>, _ z: UnsafePointer<Self>, _ delta: UnsafeMutablePointer<Self>,
+    _ rho: Self, _ dlam: UnsafeMutablePointer<Self>) -> Int32
+  /// The permutation merging two sorted lists (xlamrg, new interface).
+  static func lamrg(
+    _ n1: Int, _ n2: Int, _ a: UnsafePointer<Self>, _ stride1: Int, _ stride2: Int,
+    _ index: UnsafeMutablePointer<Int32>)
   /// C = alpha A B + beta C, A symmetric m x m, lower triangle referenced (side 'L', uplo 'L').
   static func symmLower(
     _ m: Int, _ n: Int, _ alpha: Self, _ a: UnsafePointer<Self>, _ lda: Int, _ b: UnsafePointer<Self>, _ ldb: Int,
@@ -43,6 +65,45 @@ public protocol BandReductionScalar: TridiagonalScalar {
 }
 
 extension Double: BandReductionScalar {
+  @inline(__always)
+  public static func stedcThreadSafe(
+    _ n: Int, _ d: UnsafeMutablePointer<Double>, _ e: UnsafeMutablePointer<Double>, _ z: UnsafeMutablePointer<Double>,
+    _ ldz: Int, _ work: UnsafeMutablePointer<Double>, _ lwork: Int, _ iwork: UnsafeMutablePointer<Int32>, _ liwork: Int
+  ) -> Int32 {
+    var nn = lint(n), ldz = lint(ldz), lw = lint(lwork), liw = lint(liwork), info: lint = 0
+    dstedc_new("I", &nn, d, e, z, &ldz, work, &lw, iwork, &liw, &info)
+    return info
+  }
+  @inline(__always)
+  public static func laed2(
+    _ k: UnsafeMutablePointer<Int32>, _ n: Int, _ n1: Int, _ d: UnsafeMutablePointer<Double>,
+    _ q: UnsafeMutablePointer<Double>, _ ldq: Int, _ indxq: UnsafeMutablePointer<Int32>,
+    _ rho: UnsafeMutablePointer<Double>,
+    _ z: UnsafeMutablePointer<Double>, _ dlamda: UnsafeMutablePointer<Double>, _ w: UnsafeMutablePointer<Double>,
+    _ q2: UnsafeMutablePointer<Double>, _ indx: UnsafeMutablePointer<Int32>, _ indxc: UnsafeMutablePointer<Int32>,
+    _ indxp: UnsafeMutablePointer<Int32>, _ coltyp: UnsafeMutablePointer<Int32>
+  ) -> Int32 {
+    var n = lint(n), n1 = lint(n1), ldq = lint(ldq), info: lint = 0
+    dlaed2_(k, &n, &n1, d, q, &ldq, indxq, rho, z, dlamda, w, q2, indx, indxc, indxp, coltyp, &info)
+    return info
+  }
+  @inline(__always)
+  public static func laed4(
+    _ n: Int, _ i: Int, _ d: UnsafePointer<Double>, _ z: UnsafePointer<Double>, _ delta: UnsafeMutablePointer<Double>,
+    _ rho: Double, _ dlam: UnsafeMutablePointer<Double>
+  ) -> Int32 {
+    var n = lint(n), i = lint(i), rho = rho, info: lint = 0
+    dlaed4_(&n, &i, d, z, delta, &rho, dlam, &info)
+    return info
+  }
+  @inline(__always)
+  public static func lamrg(
+    _ n1: Int, _ n2: Int, _ a: UnsafePointer<Double>, _ stride1: Int, _ stride2: Int,
+    _ index: UnsafeMutablePointer<Int32>
+  ) {
+    var n1 = lint(n1), n2 = lint(n2), s1 = lint(stride1), s2 = lint(stride2)
+    dlamrg_(&n1, &n2, a, &s1, &s2, index)
+  }
   @inline(__always)
   public static func stedc(
     _ n: Int, _ d: UnsafeMutablePointer<Double>, _ e: UnsafeMutablePointer<Double>, _ z: UnsafeMutablePointer<Double>,
@@ -114,6 +175,45 @@ extension Double: BandReductionScalar {
 }
 
 extension Float: BandReductionScalar {
+  @inline(__always)
+  public static func stedcThreadSafe(
+    _ n: Int, _ d: UnsafeMutablePointer<Float>, _ e: UnsafeMutablePointer<Float>, _ z: UnsafeMutablePointer<Float>,
+    _ ldz: Int, _ work: UnsafeMutablePointer<Float>, _ lwork: Int, _ iwork: UnsafeMutablePointer<Int32>, _ liwork: Int
+  ) -> Int32 {
+    var nn = lint(n), ldz = lint(ldz), lw = lint(lwork), liw = lint(liwork), info: lint = 0
+    sstedc_new("I", &nn, d, e, z, &ldz, work, &lw, iwork, &liw, &info)
+    return info
+  }
+  @inline(__always)
+  public static func laed2(
+    _ k: UnsafeMutablePointer<Int32>, _ n: Int, _ n1: Int, _ d: UnsafeMutablePointer<Float>,
+    _ q: UnsafeMutablePointer<Float>, _ ldq: Int, _ indxq: UnsafeMutablePointer<Int32>,
+    _ rho: UnsafeMutablePointer<Float>,
+    _ z: UnsafeMutablePointer<Float>, _ dlamda: UnsafeMutablePointer<Float>, _ w: UnsafeMutablePointer<Float>,
+    _ q2: UnsafeMutablePointer<Float>, _ indx: UnsafeMutablePointer<Int32>, _ indxc: UnsafeMutablePointer<Int32>,
+    _ indxp: UnsafeMutablePointer<Int32>, _ coltyp: UnsafeMutablePointer<Int32>
+  ) -> Int32 {
+    var n = lint(n), n1 = lint(n1), ldq = lint(ldq), info: lint = 0
+    slaed2_(k, &n, &n1, d, q, &ldq, indxq, rho, z, dlamda, w, q2, indx, indxc, indxp, coltyp, &info)
+    return info
+  }
+  @inline(__always)
+  public static func laed4(
+    _ n: Int, _ i: Int, _ d: UnsafePointer<Float>, _ z: UnsafePointer<Float>, _ delta: UnsafeMutablePointer<Float>,
+    _ rho: Float, _ dlam: UnsafeMutablePointer<Float>
+  ) -> Int32 {
+    var n = lint(n), i = lint(i), rho = rho, info: lint = 0
+    slaed4_(&n, &i, d, z, delta, &rho, dlam, &info)
+    return info
+  }
+  @inline(__always)
+  public static func lamrg(
+    _ n1: Int, _ n2: Int, _ a: UnsafePointer<Float>, _ stride1: Int, _ stride2: Int,
+    _ index: UnsafeMutablePointer<Int32>
+  ) {
+    var n1 = lint(n1), n2 = lint(n2), s1 = lint(stride1), s2 = lint(stride2)
+    slamrg_(&n1, &n2, a, &s1, &s2, index)
+  }
   @inline(__always)
   public static func stedc(
     _ n: Int, _ d: UnsafeMutablePointer<Float>, _ e: UnsafeMutablePointer<Float>, _ z: UnsafeMutablePointer<Float>,

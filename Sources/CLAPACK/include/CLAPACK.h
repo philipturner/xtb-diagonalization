@@ -77,6 +77,25 @@ void dormtr_(const char *side, const char *uplo, const char *trans, const lint *
              lint *info);
 void sstedc_(const char *compz, const lint *n, float *d, float *e, float *z, const lint *ldz, float *work,
              const lint *lwork, lint *iwork, const lint *liwork, lint *info);
+// The merge step of divide and conquer (ParallelDivideAndConquer.swift): deflation, one secular-equation root,
+// merging two sorted lists. Bound to Accelerate's new LAPACK interface ($NEWLAPACK, 32-bit integers), which Apple
+// documents as thread-safe; whether the legacy symbols are safe to call from several threads at once wasn't checked.
+void dstedc_new(const char *compz, const lint *n, double *d, double *e, double *z, const lint *ldz, double *work,
+                const lint *lwork, lint *iwork, const lint *liwork, lint *info) __asm__("_dstedc$NEWLAPACK");
+void sstedc_new(const char *compz, const lint *n, float *d, float *e, float *z, const lint *ldz, float *work,
+                const lint *lwork, lint *iwork, const lint *liwork, lint *info) __asm__("_sstedc$NEWLAPACK");
+void dlaed2_(lint *k, const lint *n, const lint *n1, double *d, double *q, const lint *ldq, lint *indxq, double *rho,
+             double *z, double *dlamda, double *w, double *q2, lint *indx, lint *indxc, lint *indxp, lint *coltyp,
+             lint *info) __asm__("_dlaed2$NEWLAPACK");
+void slaed2_(lint *k, const lint *n, const lint *n1, float *d, float *q, const lint *ldq, lint *indxq, float *rho,
+             float *z, float *dlamda, float *w, float *q2, lint *indx, lint *indxc, lint *indxp, lint *coltyp,
+             lint *info) __asm__("_slaed2$NEWLAPACK");
+void dlaed4_(const lint *n, const lint *i, const double *d, const double *z, double *delta, const double *rho,
+             double *dlam, lint *info) __asm__("_dlaed4$NEWLAPACK");
+void slaed4_(const lint *n, const lint *i, const float *d, const float *z, float *delta, const float *rho, float *dlam,
+             lint *info) __asm__("_slaed4$NEWLAPACK");
+void dlamrg_(const lint *n1, const lint *n2, const double *a, const lint *dtrd1, const lint *dtrd2, lint *index) __asm__("_dlamrg$NEWLAPACK");
+void slamrg_(const lint *n1, const lint *n2, const float *a, const lint *dtrd1, const lint *dtrd2, lint *index) __asm__("_slamrg$NEWLAPACK");
 void sormtr_(const char *side, const char *uplo, const char *trans, const lint *m, const lint *n, const float *a,
              const lint *lda, const float *tau, float *c, const lint *ldc, float *work, const lint *lwork, lint *info);
 void ssyevd_(const char *jobz, const char *uplo, const lint *n, float *a, const lint *lda, float *w, float *work,

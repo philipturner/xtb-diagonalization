@@ -43,3 +43,24 @@ public func backTransformTridiagonal<T: BandReductionScalar>(
     T.gemm("N", "N", rows, m, ib, -1, v, rows, w2, ib, 1, z, ldz)
   }
 }
+
+/// backTransformTridiagonal over `threads` workers: the m columns in one block per worker (the blocks are
+/// independent). work holds threads * tridiagonalBackTransformWorkspace(n, (m + threads - 1) / threads).
+@_specialize(exported: true, where T == Double)
+@_specialize(exported: true, where T == Float)
+public func backTransformTridiagonalParallel<T: BandReductionScalar>(
+  _ n: Int, _ m: Int, _ a: UnsafePointer<T>, _ lda: Int, _ tau: UnsafePointer<T>, _ z: UnsafeMutablePointer<T>,
+  _ ldz: Int, _ work: UnsafeMutablePointer<T>, threads: Int
+) {
+  let threads = max(threads, 1)
+  let width = (m + threads - 1) / threads
+  guard threads > 1, width > 0 else {
+    backTransformTridiagonal(n, m, a, lda, tau, z, ldz, work)
+    return
+  }
+  let slice = tridiagonalBackTransformWorkspace(n, width)
+  parallelBlocks((m + width - 1) / width, threads: threads) { blk in
+    let c0 = blk * width
+    backTransformTridiagonal(n, min(width, m - c0), a, lda, tau, z + c0 * ldz, ldz, work + blk * slice)
+  }
+}

@@ -141,3 +141,30 @@ public func backTransformTwoStage<Real: BandReductionScalar>(
     backTransformBand(n, b, v1, t1, z + c0 * ldz, ldz, width, work, gemm: options.gemmWY)
   }
 }
+
+/// Workspace (elements) per worker for backTransformTwoStageParallel with m columns.
+public func twoStageBackTransformWorkspace(_ n: Int, _ b: Int, _ m: Int, threads: Int) -> Int {
+  let width = (m + max(threads, 1) - 1) / max(threads, 1)
+  return max(bulgeBackTransformWorkspace(b, width), wyApplyWorkspace(width, b), 1)
+}
+
+/// Both back-transformations of the 2-stage path (bulge blocks built just before use, then stage 1's panels) for the
+/// first m columns of z, split into options.threads column blocks, one per worker, both stages per block. work holds
+/// options.threads * twoStageBackTransformWorkspace(n, b, m, threads:) elements (one slice per block).
+@_specialize(exported: true, where Real == Double)
+@_specialize(exported: true, where Real == Float)
+public func backTransformTwoStageParallel<Real: BandReductionScalar>(
+  _ n: Int, _ b: Int, _ v1: UnsafePointer<Real>, _ t1: UnsafePointer<Real>, _ v2: UnsafePointer<Real>,
+  _ z: UnsafeMutablePointer<Real>, _ ldz: Int, _ m: Int, _ options: SBROptions, _ work: UnsafeMutablePointer<Real>
+) {
+  let threads = max(options.threads, 1)
+  let width = (m + threads - 1) / threads
+  let slice = twoStageBackTransformWorkspace(n, b, m, threads: threads)
+  let blocks = (m + width - 1) / width
+  parallelBlocks(blocks, threads: threads) { blk in
+    let c0 = blk * width, cols = min(width, m - c0)
+    let w = work + blk * slice, zb = z + c0 * ldz
+    backTransformBulgesBlocked(n, b, v2, zb, ldz, cols, w, gemm: options.gemmWY, group: options.bulgeGroup)
+    backTransformBand(n, b, v1, t1, zb, ldz, cols, w, gemm: options.gemmWY)
+  }
+}
