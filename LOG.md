@@ -421,3 +421,12 @@
   16.59 → 18.71 (+13%). Against the 1-stage solver's 8 x 1 throughput measured earlier the same day (n = 1788: FP64
   6.44, FP32 15.63 jobs/s): 0.96x FP64 and 1.20x FP32, the first configuration where 2-stage beats 1-stage on
   throughput (to confirm in one run). `recommended()` now uses `l` + `u` from n = 700. Accuracy unchanged.
+- **Confirmed in one run: 2-stage vs the symmetric 1-stage** (`build/confirm-throughput.txt`; eigensolve alone, "1-stage
+  sym" = the Swift `sytrd.c` port xTB ships, 2-stage `tclsux` and `tclsugx`; n = 776 / 1204 / 1788 at b = 48 / 48 /
+  64). 8 x 1 jobs/s, 1-stage / `tclsux` / `tclsugx`: FP64 130.3 / 87.2 / 79.2, 24.9 / 22.1 / 20.2, 5.57 / **6.72** /
+  6.18; FP32 243.6 / 141.7 / 157.0, 69.4 / 41.4 / 49.4, 14.01 / 16.90 / **18.60**. Best 2-stage / 1-stage at 8 x 1:
+  FP64 0.67 / 0.89 / **1.21**, FP32 0.64 / 0.71 / **1.33**; one process: FP64 0.68 / 0.77 / 0.89, FP32 0.76 / 0.73 /
+  0.88. The crossover is above the target range: 2-stage wins on throughput at n = 1788 only (scaling 1 → 8
+  processes at n = 1788 FP64: 1-stage 2.6x, 2-stage 4.0x). At 8 x 1 FP64 prefers no gemmWY at every n, FP32 prefers
+  it at n = 776 and 1788 but not 1204. The 1-stage 8 x 1 numbers were 10–13% below the earlier run, so the earlier
+  cross-run estimate (1.20x FP32) was off; trust same-run comparisons only.
