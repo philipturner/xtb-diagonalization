@@ -576,5 +576,7 @@
   and 6 / 6, M5 Max 6 / 6 (level 0 is "Super" there; the Performance cores are level 1, two clusters of 6). Only the
   M1 Max value (4) is measured; whether a 5- or 6-core cluster gains from the full team is untested. Swift:
   `performanceClusterSize` (Parallel.swift), used by the exports and eigen-bench. M1 Max: same bits as `c04600e`.
-  **Next:** decide the FP32 cycle-gate question; time the Swift team variant; check that meson builds compile
+- **Decision (user):** keep the team reduction for FP32 too, despite the FP32 approx cycle-count failures (s12_C31
+  family; accuracy unchanged).
+  **Next:** time the Swift team variant; check that meson builds compile
   sytrd.c with OpenMP (else the parallel steps silently run serial).
