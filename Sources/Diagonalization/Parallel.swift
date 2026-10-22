@@ -4,6 +4,7 @@
 // problem) and the number of threads (2 / 4 / 8) are independent. Workers that must wait on another worker's progress
 // (Progress.wait) spin on an atomic with a deadline and trap if it passes, instead of hanging.
 import Atomics
+import Darwin
 import Dispatch
 
 /// A deadline for spin-waits: a stalled pipeline traps after this many seconds instead of spinning forever.
@@ -84,3 +85,18 @@ final class SpinBarrier {
     }
   }
 }
+
+/// Performance cores per cluster: hw.perflevel0.physicalcpu over its clusters, ceil(physicalcpu / cpusperl2), so a
+/// cluster with disabled cores counts the enabled ones whether cpusperl2 reports enabled or designed cores (6
+/// performance cores, cpusperl2 4 or 3: 3); 4 where the sysctls are missing. tridiagonalizeParallel's team stays
+/// within one cluster: on the M1 Max (4 per cluster), 6 and 8 workers were slower than 4.
+public let performanceClusterSize: Int = {
+  func query(_ name: String) -> Int {
+    var value: Int32 = 0
+    var size = MemoryLayout<Int32>.size
+    return sysctlbyname(name, &value, &size, nil, 0) == 0 ? Int(value) : 0
+  }
+  let cores = query("hw.perflevel0.physicalcpu"), shared = query("hw.perflevel0.cpusperl2")
+  guard cores > 0 && shared > 0 else { return 4 }
+  return cores / ((cores + shared - 1) / shared)
+}()

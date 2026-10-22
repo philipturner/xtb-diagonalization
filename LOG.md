@@ -563,7 +563,18 @@
   `symmetricMatrixVector`), `SpinBarrier` (Parallel.swift), the exports `xtb_dsytrd_upper` / `xtb_ssytrd_upper` on
   min(OpenMP threads, 4), eigen-bench variants "1-stage sym g jN team". Correct (n = 412: eigenvalues 2.7e-13 Eh,
   residual 3.5e-16); not timed (machine busy).
-- **Not measured:** single-point latency with 8 threads (case B) for `c04600e`: mediaanalysisd at 67% of a core and
-  interactive use when it was due (`build/bench-team.sh` is ready: lib-team and lib-par interleaved). Throughput
-  (8 × 1) is unchanged by construction (1 thread = serial path, bit-identical).
-  **Next:** run `build/bench-team.sh` in a quiet window; decide the FP32 question; time the Swift team variant.
+- **Single points, one SCF, 8 OpenMP threads** (`build/bench-team.sh`, `build/cases/team/`; `d0691d6` → team,
+  same quiet window, interleaved; median of 5 cold; vs prod with 1 thread): FP64 n = 412 0.230 → **0.205 s** (−10.5%,
+  2.76×), 448 0.504 → **0.417** (−17.4%, 2.58×), 619 0.948 → **0.781** (−17.6%, 2.78×), 776 0.785 → **0.614** (−21.7%,
+  3.82×), 1204 6.48 → **4.51** (−30.4%, 3.36×), 1788 31.28 → **19.09** (−39.0%, 3.81×). FP32 0.199 → **0.187** (−6.1%,
+  3.03×), 0.400 → **0.364** (−9.1%, 2.95×; 44 → 49 SCC cycles, per cycle −19%), 0.778 → **0.656** (−15.7%, 3.32×), 0.648
+  → **0.562** (−13.3%, 4.18×), 4.94 → **3.77** (−23.6%, 4.03×), 21.40 → **14.78** (−30.9%, 4.92×). Other cycle counts
+  unchanged; |dE| ≤ 1.6e-12 Eh FP64. Throughput (8 × 1) is unchanged by construction (1 thread = serial path).
+- **Team size from the hardware** (xtb `ef840cc`): hw.perflevel0.physicalcpu / ceil(physicalcpu / cpusperl2), i.e.
+  one cluster of the fastest cores, robust to cpusperl2 reporting enabled or designed cores on binned chips (6 cores:
+  3); 4 without the sysctls. Published dumps: M1 Pro / M2 Pro 8 / 4 → 4, M4 Max 12 / 6 → 6, M5 4 / 4, M5 Pro 5 / 5
+  and 6 / 6, M5 Max 6 / 6 (level 0 is "Super" there; the Performance cores are level 1, two clusters of 6). Only the
+  M1 Max value (4) is measured; whether a 5- or 6-core cluster gains from the full team is untested. Swift:
+  `performanceClusterSize` (Parallel.swift), used by the exports and eigen-bench. M1 Max: same bits as `c04600e`.
+  **Next:** decide the FP32 cycle-gate question; time the Swift team variant; check that meson builds compile
+  sytrd.c with OpenMP (else the parallel steps silently run serial).

@@ -29,7 +29,8 @@
 // (backTransformBulgesBlocked), which is faster for one thread.
 // --threads 2,4: extra "1-stage sym g jN" variants, the 1-stage path with divide and conquer and the
 // back-transformation on N workers (divideAndConquerParallel, backTransformTridiagonalParallel), the reduction
-// serial; and "1-stage sym g jN team", the same with the reduction on min(N, 4) workers (tridiagonalizeParallel).
+// serial; and "1-stage sym g jN team", the same with the reduction on min(N, performance cores per cluster)
+// workers (tridiagonalizeParallel).
 // --procs P [--jobs K]: throughput instead of latency. For each variant, P copies of this program (one file only)
 // start together and each runs the variant K times (default 20) after a warm-up; reports jobs per second as a work
 // queue sees it (sum over processes of K / elapsed) and the median job time. Run with VECLIB_MAXIMUM_THREADS=1.
@@ -329,12 +330,13 @@ func benchmark<Real: EigenScalar>(_ path: String, _: Real.Type) {
         timed(&t) { stedc(threads: threads) }
         timed(&t) { backTransformTridiagonalParallel(n, m, A, n, tau, Z, n, work, threads: threads) }
       }))
-    // The reduction on a team as well, of at most 4 workers (as sytrd.c in xTB: 6 and 8 were slower).
+    // The reduction on a team as well, of at most one cluster of performance cores (as sytrd.c in xTB).
     variants.append(Variant(
       name: "1-stage sym g j\(threads) team", stages: ["tridiag", "stedc", "ormtr-g"],
       run: { t in
         A.update(from: Hr, count: n * n)
-        timed(&t) { tridiagonalizeParallel(n, A, n, w, e, tau, work, threads: min(threads, 4)) }
+        let team = min(threads, performanceClusterSize)
+        timed(&t) { tridiagonalizeParallel(n, A, n, w, e, tau, work, threads: team) }
         timed(&t) { stedc(threads: threads) }
         timed(&t) { backTransformTridiagonalParallel(n, m, A, n, tau, Z, n, work, threads: threads) }
       }))
