@@ -605,3 +605,9 @@
 - **VECLIB_MAXIMUM_THREADS 1 vs 8** (lib-team, OMP_NUM_THREADS=8, median of 5, `build/cases/veclib/`): FP64 n = 412
   +1.3%, 619 +0.3%, 776 +2.4%, 1204 −1.8%; FP32 +0.4%, 619 +9.5% then +0.6% / +3.2% on two reruns (noise), 776 +0.6%,
   1204 −0.2%; same cycle counts. swift-xtb docs say so (`d1d1265`).
+- **Missing table entries** (`build/bench-table.sh`, quiet machine): three PRs alone (xtb `e57877d`, `build/lib-prs.dylib`)
+  at 8 × 1, FP64, s per job (8 / jobs/s): n = 412 0.581, 619 2.517, 776 2.250, 1204 23.28 (production 0.863 / 3.762 /
+  3.433 / 32.20; current FP64 0.490 / 1.991 / 1.780 / 17.90; FP32 0.391 / 1.662 / 1.525 / 12.56). Every serial
+  optimization with a serial eigensolve (`c12de28`, lib-fused) at OMP_NUM_THREADS=8, FP32, median of 5: 0.238 / 0.488
+  / 0.927 / 0.807 / 6.032 / 25.01 s (n = 412/448/619/776/1204/1788; same cycle counts as the team build except
+  1204: 58 vs 59).
