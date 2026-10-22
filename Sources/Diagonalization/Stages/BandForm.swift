@@ -83,7 +83,18 @@ public func reduceToBand<Real: BandReductionScalar>(
       Real.trmm("L", "U", "T", "N", k, k, 1, t, b, y, k)
       Real.gemm("N", "N", m, k, k, -0.5, vf, m, y, k, 1, x, m)
       if lower {
-        Real.syr2kLower(m, k, -1, vf, m, x, m, 1, a2, lda)
+        if options.lowerGEMM {
+          // The same lower triangle by gemm per block column (rows c ..< m of columns c ..< c + 128, the diagonal
+          // block in full; its upper part is never read): 8-11% slower than Accelerate's syr2k, but syr2k leaves the
+          // core in a state where the L2-bound bulge chase right after it runs 15-30% slower (LOG.md); gemm doesn't.
+          for c in stride(from: 0, to: m, by: 128) {
+            let w = min(128, m - c), h = m - c
+            Real.gemm("N", "T", h, w, k, -1, vf + c, m, x + c, m, 1, a2 + offset(c, c, lda), lda)
+            Real.gemm("N", "T", h, w, k, -1, x + c, m, vf + c, m, 1, a2 + offset(c, c, lda), lda)
+          }
+        } else {
+          Real.syr2kLower(m, k, -1, vf, m, x, m, 1, a2, lda)
+        }
       } else {
         Real.gemm("N", "T", m, m, k, -1, vf, m, x, m, 1, a2, lda)
         Real.gemm("N", "T", m, m, k, -1, x, m, vf, m, 1, a2, lda)

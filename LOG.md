@@ -407,3 +407,17 @@
   (2.5 b² elements each, ~+30% line waste: 46 KB at b = 48 FP64 vs 128 KB L1, 128-byte lines), and padding can't align
   segments because every sweep shifts the window by one row. The memory pattern is ~40% of the chase (14.8 of ~39 ms
   at b = 48, fast state). Dropped, as is an aligned scratch window.
+- **`l` without the backfire: `lowerGEMM` (`u`).** `scripts/kernels/lower_update.c` (`build/lower-update.txt`): the
+  slow state follows the last kernel: the chase's memory pattern right after `dsyr2k` 27.8 / 27.2 / 15.1 ms (runs
+  1 / 2 / 3, n = 1204), after 2 x `dgemm` or a lower triangle by `dgemm` blocks ~15, after `dsyr2k` + one tiny `dgemm`
+  (256 x 256 x 48) 15.3 (fast again; a 12 MB copy or a 3 ms wait doesn't reset it). The rank-2b lower update by
+  `dgemm` per block column of 128 costs 1.02 / 2.82 ms vs `dsyr2k` 0.94 / 2.54 and 2 x `dgemm` 2.12 / 5.77 (n = 1204 /
+  1788). New `SBROptions.lowerGEMM` (with `l`): that update in place of `syr2k`. End to end (`build/lowergemm.txt`,
+  median of 7; total / stage 1 / chase, ms): FP64 n = 1204 b = 48 `tcsgx` 188.0 / 32.7 / 39.5, `tclsgx` 192.2 / 26.8 /
+  44.9, **`tclsugx` 180.8 / 26.1 / 39.2**; n = 1788 b = 64 531.3 / 100.2 / 107.5, 531.8 / 73.3 / 137.8, **504.3 / 72.1
+  / 108.2**; n = 776 60.3 / 64.3 / **59.6**. FP32 n = 1204 100.7 / 102.4 / **98.6**, n = 1788 248.8 / 254.5 /
+  **239.9**, n = 776 37.3 / 38.6 / **36.7**. 8 x 1 throughput (`build/lowergemm-8x1.txt`, jobs/s, `tcsgx` →
+  `tclsugx`): FP64 n = 1204 16.71 → 20.23 (+21%), n = 1788 5.34 → 6.16 (+15%); FP32 n = 1204 50.22 → 50.23, n = 1788
+  16.59 → 18.71 (+13%). Against the 1-stage solver's 8 x 1 throughput measured earlier the same day (n = 1788: FP64
+  6.44, FP32 15.63 jobs/s): 0.96x FP64 and 1.20x FP32, the first configuration where 2-stage beats 1-stage on
+  throughput (to confirm in one run). `recommended()` now uses `l` + `u` from n = 700. Accuracy unchanged.

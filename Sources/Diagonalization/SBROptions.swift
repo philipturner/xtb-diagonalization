@@ -18,6 +18,9 @@ public struct SBROptions {
   public var compactBand = false
   /// With symmetricChase: every loop of the chase by explicit vector fused multiply-adds (VectorKernels.swift).
   public var vectorChase = false
+  /// With lowerTriangle: the rank-2b update of the lower triangle by gemm per block column of 128 instead of
+  /// Accelerate's syr2k, after which the bulge chase runs 15-30% slower (a hardware state, LOG.md).
+  public var lowerGEMM = false
   /// Bulge back-transformation with triangular products at both ends of each parallelogram block (larfb treats the
   /// lower (b - 1) x b part as dense, though half of it is zero). Uses the precomputed blocks (prepareBulgeBlocks).
   public var parallelogram = false
@@ -36,7 +39,7 @@ public struct SBROptions {
   public static var all: SBROptions {
     var o = SBROptions()
     o.trailingOnly = true; o.combinedUpdate = true; o.lowerTriangle = true; o.symmetricChase = true
-    o.compactBand = true; o.vectorChase = true
+    o.compactBand = true; o.vectorChase = true; o.lowerGEMM = true
     o.parallelogram = true; o.gemmWY = true
     return o
   }
@@ -44,11 +47,14 @@ public struct SBROptions {
   /// The measured best 2-stage configuration (LOG.md, 2026-10-21; M1 Max, GFN2 matrices n = 412-1788): options and
   /// the intermediate bandwidth b, for one process per core (manyProcesses, as 8 x 1 throughput) or one process alone.
   /// FP32 takes the gemm WY apply everywhere; FP64 only alone or below n = 700, since with 8 processes larfb wins at
-  /// n >= 776 (AMX contention). The lower-triangle first stage is left off: at n = 1204-1788 it saves 6-28 ms in
-  /// stage 1 and the bulge chase right after it runs as much slower (unexplained; not the data, LOG.md).
+  /// n >= 776 (AMX contention). From n = 700 the first stage updates only the lower triangle, by gemm blocks (not
+  /// syr2k, after which the bulge chase runs 15-30% slower): 1-5% faster alone, 13-21% more throughput at 8 x 1 for
+  /// n >= 1204 (FP32 n = 1204 unchanged).
   public static func recommended(n: Int, fp32: Bool, manyProcesses: Bool) -> (options: SBROptions, bandwidth: Int) {
     var o = SBROptions()
     o.trailingOnly = true; o.combinedUpdate = true; o.symmetricChase = true; o.vectorChase = true
+    o.lowerTriangle = n >= 700
+    o.lowerGEMM = n >= 700
     o.gemmWY = fp32 || !manyProcesses || n < 700
     let b = n < 700 ? 32 : n < 1500 ? 48 : 64
     return (o, b)
