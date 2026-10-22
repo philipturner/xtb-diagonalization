@@ -1,8 +1,9 @@
 // Reduction of a symmetric matrix (upper triangle) to tridiagonal form: LAPACK's blocked dsytrd (dlatrd panels of 32
 // columns + dsyr2k, dsytd2 for the last block), a line-by-line port of xtb/src/mctc/lapack/sytrd.c. The output
-// (Householder vectors in A, tau) is what dormtr expects. The only change from LAPACK: the symmetric matrix-vector
+// (Householder vectors in A, tau) is what dormtr expects. The changes from LAPACK: the symmetric matrix-vector
 // product, the BLAS2 core of the reduction, is a vectorized kernel that reads the triangle once for eight columns at
-// a time. Everything else calls Accelerate's legacy BLAS/LAPACK.
+// a time, and dlatrd's panel products are fused pairs of gemv calls (panelUpdate, panelDots, as sytrd.c). Everything
+// else calls Accelerate's legacy BLAS/LAPACK.
 //
 // symmetric = false is the same reduction without exploiting symmetry: the full matrix (both triangles) is read and
 // updated, with gemv, gemm and ger in place of symv, syr2k and syr2, at twice the work. The gemv is 'T' (A^T x = A x):
@@ -362,6 +363,135 @@ public func symmetricMatrixVector<T: TridiagonalScalar>(
   }
 }
 
+/// dlatrd's panel products, fused (each pair of LAPACK's gemv calls reads the panels of A and W that share their
+/// rows): y -= P1 c1 + P2 c2 in one pass over y, eight columns per load of y. P1 and P2 are rows x m, column-major.
+/// Same operations as sytrd.c's panel_update.
+@inline(__always)
+func panelUpdate<T: TridiagonalScalar>(
+  _ rows: Int, _ m: Int, _ p1: UnsafePointer<T>, _ ld1: Int, _ c1: UnsafePointer<T>, _ p2: UnsafePointer<T>,
+  _ ld2: Int, _ c2: UnsafePointer<T>, _ y: UnsafeMutablePointer<T>
+) {
+  let w = T.Vector.scalarCount
+  var c = 0
+  while c + 4 <= m {
+    let a0 = p1 + c * ld1, a1 = a0 + ld1, a2 = a1 + ld1, a3 = a2 + ld1
+    let b0 = p2 + c * ld2, b1 = b0 + ld2, b2 = b1 + ld2, b3 = b2 + ld2
+    let ka0 = T.Vector(repeating: -c1[c]), ka1 = T.Vector(repeating: -c1[c + 1])
+    let ka2 = T.Vector(repeating: -c1[c + 2]), ka3 = T.Vector(repeating: -c1[c + 3])
+    let kb0 = T.Vector(repeating: -c2[c]), kb1 = T.Vector(repeating: -c2[c + 1])
+    let kb2 = T.Vector(repeating: -c2[c + 2]), kb3 = T.Vector(repeating: -c2[c + 3])
+    var i = 0
+    while i + w <= rows {
+      var yi: T.Vector = load(y + i)
+      yi = T.fma(yi, load(a0 + i), ka0)
+      yi = T.fma(yi, load(b0 + i), kb0)
+      yi = T.fma(yi, load(a1 + i), ka1)
+      yi = T.fma(yi, load(b1 + i), kb1)
+      yi = T.fma(yi, load(a2 + i), ka2)
+      yi = T.fma(yi, load(b2 + i), kb2)
+      yi = T.fma(yi, load(a3 + i), ka3)
+      yi = T.fma(yi, load(b3 + i), kb3)
+      store(yi, y + i)
+      i += w
+    }
+    while i < rows {
+      var t = a0[i] * c1[c] + b0[i] * c2[c]
+      t += a1[i] * c1[c + 1]
+      t += b1[i] * c2[c + 1]
+      t += a2[i] * c1[c + 2]
+      t += b2[i] * c2[c + 2]
+      t += a3[i] * c1[c + 3]
+      t += b3[i] * c2[c + 3]
+      y[i] -= t
+      i += 1
+    }
+    c += 4
+  }
+  while c < m {
+    let a0 = p1 + c * ld1, b0 = p2 + c * ld2
+    let ka = T.Vector(repeating: -c1[c]), kb = T.Vector(repeating: -c2[c])
+    var i = 0
+    while i + w <= rows {
+      var yi: T.Vector = load(y + i)
+      yi = T.fma(yi, load(a0 + i), ka)
+      yi = T.fma(yi, load(b0 + i), kb)
+      store(yi, y + i)
+      i += w
+    }
+    while i < rows {
+      y[i] -= a0[i] * c1[c] + b0[i] * c2[c]
+      i += 1
+    }
+    c += 1
+  }
+}
+
+/// u1 = P1^T x and u2 = P2^T x in one pass over x, eight dot products per load of x (sytrd.c's panel_dots).
+@inline(__always)
+func panelDots<T: TridiagonalScalar>(
+  _ rows: Int, _ m: Int, _ p1: UnsafePointer<T>, _ ld1: Int, _ p2: UnsafePointer<T>, _ ld2: Int,
+  _ x: UnsafePointer<T>, _ u1: UnsafeMutablePointer<T>, _ u2: UnsafeMutablePointer<T>
+) {
+  let w = T.Vector.scalarCount
+  var c = 0
+  while c + 4 <= m {
+    let a0 = p1 + c * ld1, a1 = a0 + ld1, a2 = a1 + ld1, a3 = a2 + ld1
+    let b0 = p2 + c * ld2, b1 = b0 + ld2, b2 = b1 + ld2, b3 = b2 + ld2
+    var sa0 = T.Vector(), sa1 = T.Vector(), sa2 = T.Vector(), sa3 = T.Vector()
+    var sb0 = T.Vector(), sb1 = T.Vector(), sb2 = T.Vector(), sb3 = T.Vector()
+    var i = 0
+    while i + w <= rows {
+      let xi: T.Vector = load(x + i)
+      sa0 = T.fma(sa0, load(a0 + i), xi)
+      sb0 = T.fma(sb0, load(b0 + i), xi)
+      sa1 = T.fma(sa1, load(a1 + i), xi)
+      sb1 = T.fma(sb1, load(b1 + i), xi)
+      sa2 = T.fma(sa2, load(a2 + i), xi)
+      sb2 = T.fma(sb2, load(b2 + i), xi)
+      sa3 = T.fma(sa3, load(a3 + i), xi)
+      sb3 = T.fma(sb3, load(b3 + i), xi)
+      i += w
+    }
+    var ta0 = T.horizontalSum(sa0), ta1 = T.horizontalSum(sa1), ta2 = T.horizontalSum(sa2)
+    var ta3 = T.horizontalSum(sa3), tb0 = T.horizontalSum(sb0), tb1 = T.horizontalSum(sb1)
+    var tb2 = T.horizontalSum(sb2), tb3 = T.horizontalSum(sb3)
+    while i < rows {
+      ta0 += a0[i] * x[i]
+      ta1 += a1[i] * x[i]
+      ta2 += a2[i] * x[i]
+      ta3 += a3[i] * x[i]
+      tb0 += b0[i] * x[i]
+      tb1 += b1[i] * x[i]
+      tb2 += b2[i] * x[i]
+      tb3 += b3[i] * x[i]
+      i += 1
+    }
+    u1[c] = ta0; u1[c + 1] = ta1; u1[c + 2] = ta2; u1[c + 3] = ta3
+    u2[c] = tb0; u2[c + 1] = tb1; u2[c + 2] = tb2; u2[c + 3] = tb3
+    c += 4
+  }
+  while c < m {
+    let a0 = p1 + c * ld1, b0 = p2 + c * ld2
+    var sa = T.Vector(), sb = T.Vector()
+    var i = 0
+    while i + w <= rows {
+      let xi: T.Vector = load(x + i)
+      sa = T.fma(sa, load(a0 + i), xi)
+      sb = T.fma(sb, load(b0 + i), xi)
+      i += w
+    }
+    var ta = T.horizontalSum(sa), tb = T.horizontalSum(sb)
+    while i < rows {
+      ta += a0[i] * x[i]
+      tb += b0[i] * x[i]
+      i += 1
+    }
+    u1[c] = ta
+    u2[c] = tb
+    c += 1
+  }
+}
+
 /// Offset of element (i, j), 1-based, in a column-major matrix with leading dimension ld.
 @inline(__always)
 private func at(_ i: Int, _ j: Int, _ ld: Int) -> Int { (i - 1) + (j - 1) * ld }
@@ -376,8 +506,15 @@ func latrdUpper<T: TridiagonalScalar>(
     let iw = i - n + nb
     if i < n {
       let m = n - i
-      T.gemv("N", i, m, -1, a + at(1, i + 1, lda), lda, w + at(i, iw + 1, ldw), ldw, 1, a + at(1, i, lda))
-      T.gemv("N", i, m, -1, w + at(1, iw + 1, ldw), ldw, a + at(i, i + 1, lda), lda, 1, a + at(1, i, lda))
+      // The row i of W's and A's trailing panel columns, contiguous (m < nb = 32).
+      withUnsafeTemporaryAllocation(of: T.self, capacity: 2 * m) { rowsBuffer in
+        let wr = rowsBuffer.baseAddress!, ar = wr + m
+        for c in 0..<m {
+          wr[c] = w[at(i, iw + 1 + c, ldw)]
+          ar[c] = a[at(i, i + 1 + c, lda)]
+        }
+        panelUpdate(i, m, a + at(1, i + 1, lda), lda, wr, w + at(1, iw + 1, ldw), ldw, ar, a + at(1, i, lda))
+      }
     }
     if i > 1 {
       let im1 = i - 1
@@ -391,10 +528,15 @@ func latrdUpper<T: TridiagonalScalar>(
       }
       if i < n {
         let m = n - i
-        T.gemv("T", im1, m, 1, w + at(1, iw + 1, ldw), ldw, a + at(1, i, lda), 1, 0, w + at(i + 1, iw, ldw))
-        T.gemv("N", im1, m, -1, a + at(1, i + 1, lda), lda, w + at(i + 1, iw, ldw), 1, 1, w + at(1, iw, ldw))
-        T.gemv("T", im1, m, 1, a + at(1, i + 1, lda), lda, a + at(1, i, lda), 1, 0, w + at(i + 1, iw, ldw))
-        T.gemv("N", im1, m, -1, w + at(1, iw + 1, ldw), ldw, w + at(i + 1, iw, ldw), 1, 1, w + at(1, iw, ldw))
+        // u = W^T v and u2 = A^T v in one pass, then w -= A u + W u2 in one; W(i + 1 ... n, iw) ends as u2, as
+        // with LAPACK's call order.
+        withUnsafeTemporaryAllocation(of: T.self, capacity: m) { uBuffer in
+          let u = uBuffer.baseAddress!
+          panelDots(im1, m, w + at(1, iw + 1, ldw), ldw, a + at(1, i + 1, lda), lda, a + at(1, i, lda), u,
+                    w + at(i + 1, iw, ldw))
+          panelUpdate(im1, m, a + at(1, i + 1, lda), lda, u, w + at(1, iw + 1, ldw), ldw, w + at(i + 1, iw, ldw),
+                      w + at(1, iw, ldw))
+        }
       }
       T.scal(im1, tau[i - 2], w + at(1, iw, ldw))
       let alpha = -0.5 * tau[i - 2] * T.dot(im1, w + at(1, iw, ldw), a + at(1, i, lda))

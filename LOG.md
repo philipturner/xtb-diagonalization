@@ -473,3 +473,11 @@
   **Next candidate:** `dstedc` is now ~45% of the 1-stage eigensolve and its top merge is 40–46% of it
   (`stedc_split.c`, random matrices); an own top merge (halves by dstedc, deflation and secular equation by LAPACK's
   dlaed routines) could form only the m occupied columns. Also open: fused panel gemvs in latrd (gemv 12–20%).
+- **Fused panel products in dlatrd** (xtb `c12de28`; Swift `panelUpdate` / `panelDots`, bit-identical to the C on four
+  dumps): the six gemv calls per column become three NEON passes. Reduction FP64 3.30 → 3.00 / 4.23 → 3.85 / 10.31 →
+  9.64 / 16.81 ms (n = 412/448/619/776; FP32 −8 to −13%). Gates FP64 phase2 177/177, tight 192/192; FP32 approx
+  175/177 (two 100 K cycle counts, +0.33% cycles). Single points vs `58db33d` −0.2 to −3.2%.
+- **dstedc investigated** (`scripts/kernels/stedc_partial.c`: tear, dstedc on halves, LAPACK's dlaed2, a port of
+  dlaed3): on GFN2 tridiagonals the top merge's eigenvector gemm is small (n = 412: 0.57 of 4.57 ms; roots by dlaed4
+  1.19, halves 2.63), so forming only the occupied columns gains just 1.10–1.11×. Its value is parallelism (two
+  halves, independent roots); the parallel solver below uses it.
