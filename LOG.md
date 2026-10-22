@@ -580,3 +580,16 @@
   family; accuracy unchanged).
   **Next:** time the Swift team variant; check that meson builds compile
   sytrd.c with OpenMP (else the parallel steps silently run serial).
+
+## 2026-10-22 (later): swift-xtb side branch, macOS only
+- The user paused the Windows port. `HANDOFF-WINDOWS.md` (8924cd7) removed; it's in history if Windows resumes (on
+  x86 the team reduction is compiled out; sytrd.c was syntax-checked for x86_64 only).
+- **xtb `swift-xtb-2026-diagonalization`** (`a02c0a5`, local, not pushed): `diagonalization` (d6c5552) merged with
+  `swift-xtb-2026` (two GFN-FF patches: no `gfnff_topo` / `gfnff_charges` written, no `.CHRG` / `charges` read).
+  `diagonalization` itself stays free of them (upstream-bound). Built as production (CMake, GCC 16, Accelerate,
+  OpenMP for C and Fortran): `build/xtb-build-s26d`.
+- **swift-xtb `fp32-diagonalization`** (`d56e98a`, clone in `build/swift-xtb-fp32`, not pushed): `compile-macos.sh`
+  clones that xtb branch; the Windows script still builds `swift-xtb-2026`. With the local build installed
+  relocatable (`build/install-swift-xtb-lib2.sh LIB DEST`): `bash test.sh` 20/20 pass (FP32 precision and GFN-FF
+  tests included), no stray files. For the script to work as committed, the user pushes the xtb branch
+  `swift-xtb-2026-diagonalization` and swift-xtb `fp32-diagonalization`.
