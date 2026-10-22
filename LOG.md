@@ -637,5 +637,6 @@
   now the default of `make_reference.py` and `PROD` in `bench_cases.sh`; CLAUDE.md, BRIEF.md and baseline.md say so.
   The other scripts take the library as an argument.
 - **Next:** the user pushes xtb `diagonalization` (392337f) and rebuilds the mechanosynthesis library; the swift-xtb
-  `fp32-diagonalization` build picks it up from the branch. Optional: check how often legacy `slaed4` fails on the FP32
-  grid (it would also hit the parallel D&C's merges at n ≥ 256, which call the same routine).
+  `fp32-diagonalization` build picks it up from the branch. Only the serial D&C path (1 thread, or n < 256) calls legacy
+  `sstedc`; the parallel one (`sytrd.c`, `XTB_TS`) already uses the `$NEWLAPACK` routines, which solve this case.
+  Option: the serial FP32 path could call `sstedc$NEWLAPACK` too (changes FP32 bits at 1 thread; not measured).
